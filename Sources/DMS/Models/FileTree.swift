@@ -38,7 +38,7 @@ struct FileNode: Identifiable, Sendable {
 enum FileTree {
     /// Baut aus den Dateien eine Ordnerstruktur, je Quelle ein Wurzelknoten.
     /// Ordnerketten mit nur einem Unterordner werden zusammengefasst („Fotos/2024/Urlaub“).
-    static func folders(_ rows: [FileRow], sources: [Source]) -> [FileNode] {
+    static func folders(_ rows: [FileRow], sources: [Source], extraFolders: Set<String> = []) -> [FileNode] {
         final class Builder {
             var name: String
             var path: String
@@ -96,6 +96,23 @@ enum FileTree {
                 }
             }
             current.files.append(row)
+        }
+        // Neu angelegte, noch leere Ordner zeigen (nur in Quellen, die schon im Baum sind)
+        for folder in extraFolders.sorted() {
+            guard let source = sources.first(where: { $0.contains(folder) && folder != $0.path }),
+                  let sourceId = source.id, let root = roots[sourceId] else { continue }
+            var current = root
+            var path = source.path
+            for part in folder.dropFirst(source.path.count + 1).split(separator: "/").map(String.init) {
+                path += "/" + part
+                if let next = current.folders[part] {
+                    current = next
+                } else {
+                    let next = Builder(name: part, path: path)
+                    current.folders[part] = next
+                    current = next
+                }
+            }
         }
         // Wurzel nie zusammenziehen, damit der Quellenname sichtbar bleibt
         return order.compactMap { roots[$0]?.node(collapsible: false) }

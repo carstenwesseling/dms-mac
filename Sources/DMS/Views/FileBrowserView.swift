@@ -178,15 +178,28 @@ struct FilterBar: View {
             .disabled(sidebarFixesCategory)
 
             Picker("Endung", selection: $state.filterExt) {
-                Text("Alle Endungen").tag(String?.none)
+                Text("Endung").tag(String?.none)
                 Divider()
                 ForEach(visibleExtensions, id: \.ext) { item in
-                    Text("\(item.ext.uppercased())  (\(item.count.formatted()))").tag(String?.some(item.ext))
+                    Text("\(String(item.ext.uppercased().prefix(8)))  (\(item.count.formatted()))").tag(String?.some(item.ext))
                 }
             }
             .labelsHidden()
-            .fixedSize()
+            .frame(width: 110)
             .help("Dateiendung")
+
+            if state.browseMode == .folders {
+                Button {
+                    if let parent = state.targetFolder {
+                        NotificationCenter.default.post(name: .dmsNewFolder, object: parent)
+                    }
+                } label: {
+                    Image(systemName: "folder.badge.plus")
+                }
+                .buttonStyle(.borderless)
+                .disabled(state.targetFolder == nil)
+                .help("Neuer Ordner im markierten Ordner")
+            }
 
             if state.hasActiveFilter {
                 Button {

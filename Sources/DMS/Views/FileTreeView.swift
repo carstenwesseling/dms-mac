@@ -14,6 +14,8 @@ struct FileTreeView: View {
     @State private var nodeSelection: Set<String> = []
     @State private var pendingDelete: [URL] = []
     @State private var confirmDelete = false
+    @State private var newFolderParent: URL?
+    @State private var newFolderName = "Neuer Ordner"
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -37,8 +39,12 @@ struct FileTreeView: View {
             .onDeleteCommand { askDelete(urls(for: nodeSelection)) }
             .onChange(of: nodeSelection) {
                 state.selection = Set(nodeSelection.compactMap { $0.hasPrefix("f:") ? Int64($0.dropFirst(2)) : nil })
+                state.targetFolder = targetFolder(for: nodeSelection)
             }
-            .task(id: TreeKey(rows: state.rows.map(\.id), mode: mode)) {
+            .onReceive(NotificationCenter.default.publisher(for: .dmsNewFolder)) { note in
+                if let parent = note.object as? URL { askNewFolder(in: parent) }
+            }
+            .task(id: TreeKey(version: state.rowsVersion, mode: mode, extra: state.createdFolders.count)) {
                 await rebuild()
                 revealIfNeeded(proxy)
             }
@@ -58,6 +64,20 @@ struct FileTreeView: View {
                     .background(.regularMaterial, in: Capsule())
                     .padding(12)
                 }
+            }
+            .alert("Neuer Ordner", isPresented: Binding(get: { newFolderParent != nil }, set: { if !$0 { newFolderParent = nil } })) {
+                TextField("Name", text: $newFolderName)
+                Button("Anlegen") {
+                    if let parent = newFolderParent, let url = state.createFolder(named: newFolderName, in: parent) {
+                        expanded.insert("d:" + parent.path)
+                        state.revealPath = nil
+                        nodeSelection = ["d:" + url.path]
+                    }
+                    newFolderParent = nil
+                }
+                Button("Abbrechen", role: .cancel) { newFolderParent = nil }
+            } message: {
+                Text(newFolderParent.map { "In „\($0.lastPathComponent)“" } ?? "")
             }
             .confirmationDialog(deleteTitle, isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("In den Papierkorb legen", role: .destructive) { state.trash(pendingDelete) }
@@ -89,6 +109,9 @@ struct FileTreeView: View {
             if let clip = state.clipboard, let folder = targetFolder(for: ids) {
                 Button("\(clip.urls.count) Element(e) hier einfügen") { state.paste(into: folder) }
             }
+            if let folder = targetFolder(for: ids) {
+                Button("Neuer Ordner …") { askNewFolder(in: folder) }
+            }
             Divider()
             Button("Löschen …", role: .destructive) { askDelete(urls) }
                 .disabled(urls.isEmpty)
@@ -97,6 +120,12 @@ struct FileTreeView: View {
 
     private var deleteTitle: String {
         pendingDelete.count == 1 ? "„\(pendingDelete[0].lastPathComponent)“ löschen?" : "\(pendingDelete.count) Elemente löschen?"
+    }
+
+    private func askNewFolder(in parent: URL) {
+        guard mode == .folders else { return }
+        newFolderName = "Neuer Ordner"
+        newFolderParent = parent
     }
 
     private func askDelete(_ urls: [URL]) {
@@ -131,8 +160,9 @@ struct FileTreeView: View {
     // MARK: Auswahl
 
     private struct TreeKey: Equatable {
-        var rows: [Int64]
+        var version: Int
         var mode: BrowseMode
+        var extra: Int
     }
 
     private func rows(for ids: Set<String>) -> [FileRow] {
@@ -160,9 +190,11 @@ struct FileTreeView: View {
         let rows = state.rows
         let sources = state.sources
         let mode = self.mode
+        let extra = state.createdFolders
         let built = await Task.detached(priority: .userInitiated) {
-            mode == .groups ? FileTree.groups(rows) : FileTree.folders(rows, sources: sources)
+            mode == .groups ? FileTree.groups(rows) : FileTree.folders(rows, sources: sources, extraFolders: extra)
         }.value
+        if Task.isCancelled { return }
         nodes = built
         var flat: [String: FileNode] = [:]
         func add(_ list: [FileNode]) {
@@ -285,4 +317,9 @@ private struct DropTarget: ViewModifier {
             content
         }
     }
+}
+
+extension Notification.Name {
+    /// „Neuer Ordner“ aus der Filterleiste; object ist der übergeordnete Ordner (URL).
+    static let dmsNewFolder = Notification.Name("dmsNewFolder")
 }

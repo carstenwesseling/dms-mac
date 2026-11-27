@@ -366,7 +366,7 @@ struct CategoryStats: Identifiable, Sendable {
     var id: String { category.rawValue }
 }
 
-struct IndexProgress: Sendable {
+struct IndexProgress: Sendable, Equatable {
     var total: Int
     var pending: Int
     var withText: Int

@@ -96,7 +96,10 @@ extension Organizer {
                 if let sourceId = destSource?.id {
                     try db.execute(sql: "UPDATE file SET path = ?, name = ?, sourceId = ? WHERE id = ?",
                                    arguments: [newPath, name, sourceId, id])
-                    try AppDatabase.reindexFTS(db, fileId: id)
+                    // Suchindex nur neu schreiben, wenn sich der Name geändert hat (Pfad steht nicht darin)
+                    if name != URL(fileURLWithPath: path).lastPathComponent {
+                        try AppDatabase.reindexFTS(db, fileId: id)
+                    }
                 } else {
                     // Ziel liegt außerhalb der eingebundenen Quellen: nicht mehr im Index führen
                     _ = try FileRecord.deleteOne(db, key: id)

@@ -139,6 +139,13 @@ final class FileTreeTests: XCTestCase {
         XCTAssertEqual(FileTree.ancestors(of: "/x/Fotos/2024/Urlaub/b.jpg", in: tree).count, 2)
     }
 
+    func testEmptyCreatedFolderAppears() {
+        let source = Source(id: 1, name: "Sicherung", kind: .local, path: "/x", remoteURL: nil, lastScan: nil)
+        let tree = FileTree.folders([row(1, "/x/a.pdf")], sources: [source], extraFolders: ["/x/Neu", "/y/Fremd"])
+        XCTAssertEqual(tree[0].children?.map(\.name), ["Neu", "a.pdf"])
+        XCTAssertEqual(tree[0].children?.first?.fileCount, 0)
+    }
+
     func testAlbumGroups() {
         let rows = [row(1, "/m/21_Der ultimative Ratgeber für alles.mp3"), row(2, "/m/15_Der ultimative Ratgeber für alles.mp3"),
                     row(3, "/m/22_Der ultimative Ratgeber für alles.mp3"), row(4, "/m/Anderes Lied.mp3")]

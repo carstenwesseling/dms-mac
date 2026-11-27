@@ -236,7 +236,17 @@ final class Indexer: @unchecked Sendable {
     /// Aktualisiert den Index für geänderte Pfade, ohne die ganze Quelle neu zu scannen.
     func refresh(paths: [String], sources: [Source]) {
         let fm = FileManager.default
-        for path in Set(paths) {
+        var knownCache: [Int64: [String: Known]] = [:]
+        func cachedKnown(_ sourceId: Int64) throws -> [String: Known] {
+            if let cached = knownCache[sourceId] { return cached }
+            let loaded = try knownFiles(sourceId: sourceId)
+            knownCache[sourceId] = loaded
+            return loaded
+        }
+        // Nur oberste Pfade: ein Ordner deckt Änderungen darin ab
+        let unique = Set(paths)
+        let topPaths = unique.filter { path in !unique.contains { path.hasPrefix($0 + "/") } }
+        for path in topPaths {
             guard let source = sources.first(where: { path == $0.path || path.hasPrefix($0.path + "/") }),
                   let sourceId = source.id else { continue }
             var isDir: ObjCBool = false
@@ -247,7 +257,7 @@ final class Indexer: @unchecked Sendable {
                         try db.execute(sql: "DELETE FROM file WHERE path = ? OR path LIKE ?", arguments: [path, path + "/%"])
                     }
                 } else if isDir.boolValue {
-                    var known = try knownFiles(sourceId: sourceId)
+                    var known = try cachedKnown(sourceId)
                     let mark = Int64(Date().timeIntervalSince1970 * 1000)
                     var batch: [FileInfo] = []
                     if let en = fm.enumerator(at: URL(fileURLWithPath: path), includingPropertiesForKeys: Array(Self.resourceKeys),
@@ -257,10 +267,12 @@ final class Indexer: @unchecked Sendable {
                         }
                     }
                     try write(batch, sourceId: sourceId, kind: source.kind, mark: mark, known: &known)
+                    knownCache[sourceId] = known
                 } else if let info = Self.info(for: URL(fileURLWithPath: path)) {
-                    var known = try knownFiles(sourceId: sourceId)
+                    var known = try cachedKnown(sourceId)
                     let mark = Int64(Date().timeIntervalSince1970 * 1000)
                     try write([info], sourceId: sourceId, kind: source.kind, mark: mark, known: &known)
+                    knownCache[sourceId] = known
                 }
             } catch {
                 NSLog("DMS refresh failed for \(path): \(error)")

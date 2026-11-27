@@ -43,6 +43,12 @@ final class AppState: ObservableObject {
     @Published var clipboard: (urls: [URL], cut: Bool)?
     @Published var fileOperationRunning = false
     @Published var rows: [FileRow] = []
+    /// Zählt bei jedem neuen Suchergebnis hoch; günstiger Vergleich für Ansichten statt aller IDs
+    private(set) var rowsVersion = 0
+    /// Ordner, die in dieser Sitzung angelegt wurden und noch leer sind (damit sie im Baum erscheinen)
+    @Published var createdFolders: Set<String> = []
+    /// Ordner, in den „Neuer Ordner“ und „Einfügen“ zielen (aus der Auswahl in der Ordneransicht)
+    @Published var targetFolder: URL?
     @Published var selection: Set<Int64> = []
     @Published var status: String = ""
     @Published var progress = IndexProgress(total: 0, pending: 0, withText: 0)
@@ -113,6 +119,7 @@ final class AppState: ObservableObject {
             }.value
             if Task.isCancelled { return }
             self.rows = result
+            self.rowsVersion &+= 1
             self.selection = self.selection.intersection(Set(result.map(\.id)))
         }
     }
@@ -162,6 +169,25 @@ final class AppState: ObservableObject {
 
     func copy(_ urls: [URL], into folder: URL) {
         runFileOperation("kopiert") { $0.copy(urls, into: folder) }
+    }
+
+    /// Legt einen neuen Ordner an. Gibt eine Fehlermeldung zurück oder nil.
+    @discardableResult
+    func createFolder(named name: String, in parent: URL) -> URL? {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "/", with: "-")
+        guard !clean.isEmpty else { return nil }
+        let url = FileOps.uniqueURL(for: parent.appendingPathComponent(clean, isDirectory: true))
+        do {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+            createdFolders.insert(url.path)
+            status = "Ordner „\(url.lastPathComponent)“ angelegt"
+            rowsVersion &+= 1
+            objectWillChange.send()
+            return url
+        } catch {
+            errorMessage = "Ordner konnte nicht angelegt werden: \(error.localizedDescription)"
+            return nil
+        }
     }
 
     func trash(_ urls: [URL]) {
@@ -343,7 +369,8 @@ final class AppState: ObservableObject {
         Task {
             while true {
                 let db = self.db
-                if let p = await Task.detached(operation: { try? db.progress() }).value {
+                if let p = await Task.detached(operation: { try? db.progress() }).value, p != self.progress {
+                    // Nur bei Änderung veröffentlichen, sonst zeichnen alle Ansichten alle 3 Sekunden neu
                     self.progress = p
                 }
                 try? await Task.sleep(for: .seconds(3))
@@ -368,7 +395,8 @@ final class AppState: ObservableObject {
         let indexer = self.indexer
         watcher = FolderWatcher(paths: watched.map(\.path)) { [weak self] paths in
             indexer.refresh(paths: paths, sources: watched)
-            Task { @MainActor in self?.search() }
+            // Viele Änderungen kurz hintereinander (z. B. beim Verschieben) lösen nur eine Suche aus
+            Task { @MainActor in self?.search(debounce: true) }
         }
     }
 
