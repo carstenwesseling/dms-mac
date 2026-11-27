@@ -28,6 +28,11 @@ struct DMSApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        // App-Symbol im Dock (Vorlage: docs/AppIcon.svg)
+        if let url = Bundle.module.url(forResource: "AppIcon", withExtension: "png"),
+           let icon = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = icon
+        }
         NSApp.activate(ignoringOtherApps: true)
         // Fenster nach vorne holen (beim Start aus Xcode liegt es sonst oft hinter Xcode)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {

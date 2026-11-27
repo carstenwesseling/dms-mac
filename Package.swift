@@ -19,6 +19,7 @@ let package = Package(
                 .product(name: "ZIPFoundation", package: "ZIPFoundation"),
             ],
             path: "Sources/DMS",
+            resources: [.copy("Resources/AppIcon.png")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
