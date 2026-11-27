@@ -153,6 +153,17 @@ final class AppDatabase: @unchecked Sendable {
             }
         }
 
+        migrator.registerMigration("v3-ki") { db in
+            // Ergebnisse der lokalen KI: Zusammenfassung und erkannte Bildinhalte
+            try db.create(table: "analysis") { t in
+                t.primaryKey("fileId", .integer).references("file", onDelete: .cascade)
+                t.column("summary", .text)
+                t.column("labels", .text)
+                t.column("model", .text).notNull()
+                t.column("at", .datetime).notNull()
+            }
+        }
+
         return migrator
     }
 }

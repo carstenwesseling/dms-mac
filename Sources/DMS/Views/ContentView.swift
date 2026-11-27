@@ -24,6 +24,8 @@ struct ContentView: View {
                     StorageSettingsView()
                 case .log:
                     ActionLogView()
+                case .ai:
+                    AIView()
                 default:
                     FileBrowserView()
                 }

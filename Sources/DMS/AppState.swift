@@ -14,6 +14,7 @@ enum SidebarItem: Hashable {
     case rules
     case storageSettings
     case log
+    case ai
 }
 
 /// Zentrale Steuerung der App: Quellen, Suche, Auswahl, Hintergrundarbeit.
@@ -22,6 +23,7 @@ final class AppState: ObservableObject {
     let db: AppDatabase
     let indexer: Indexer
     let organizer: Organizer
+    let analyzer: Analyzer
 
     @Published var sources: [Source] = []
     @Published var tags: [Tag] = []
@@ -45,6 +47,7 @@ final class AppState: ObservableObject {
         }
         indexer = Indexer(db: db)
         organizer = Organizer(db: db, indexer: indexer)
+        analyzer = Analyzer(db: db)
         reloadSidebar()
         search()
     }
@@ -168,6 +171,18 @@ final class AppState: ObservableObject {
                 }
                 if work == 0 {
                     try? await Task.sleep(for: .seconds(15))
+                }
+            }
+        }
+
+        // Lokale KI: Bilder erkennen, Dokumente zusammenfassen (nur wenn ein Modell verfügbar ist)
+        let analyzer = self.analyzer
+        Task.detached(priority: .background) {
+            while true {
+                var work = analyzer.tagImages(limit: 10)
+                work += await analyzer.summarizePending(limit: 1)
+                if work == 0 {
+                    try? await Task.sleep(for: .seconds(30))
                 }
             }
         }

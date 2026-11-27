@@ -134,6 +134,7 @@ struct FileDetailView: View {
                         info("Inhalt", row.file.textState.label)
                     }
                     .font(.callout)
+                    AnalysisSection(file: row.file)
                     VersionsSection(file: row.file)
                 }
                 .padding()

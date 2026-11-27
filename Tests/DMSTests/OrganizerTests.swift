@@ -118,3 +118,38 @@ final class OrganizerTests: XCTestCase {
         XCTAssertEqual(groups.first?.files.count, 2)
     }
 }
+
+final class AnalyzerTests: XCTestCase {
+    func testParsesModelAnswer() {
+        let answer = """
+            <think>überlegen</think>
+            **ZUSAMMENFASSUNG:** Stromrechnung der Stadtwerke für 2024.
+            Fällig am 15. März.
+            SCHLAGWÖRTER: Rechnung, Strom, Stadtwerke, 2024.
+            """
+        let parsed = Analyzer.parse(answer)
+        XCTAssertEqual(parsed.summary, "Stromrechnung der Stadtwerke für 2024. Fällig am 15. März.")
+        XCTAssertEqual(parsed.tags, ["Rechnung", "Strom", "Stadtwerke", "2024"])
+    }
+
+    func testGermanImageLabels() {
+        XCTAssertEqual(ImageLabels.german("beach"), "Strand")
+        XCTAssertEqual(ImageLabels.german("hot_air_balloon"), "Hot Air Balloon")
+    }
+
+    func testAITagSuggestionsSurviveReplanning() throws {
+        let db = try AppDatabase.inMemory()
+        let organizer = Organizer(db: db, indexer: Indexer(db: db))
+        try db.writer.write { db in
+            var source = Source(id: nil, name: "S", kind: .local, path: "/tmp/dms-ai-test", remoteURL: nil, lastScan: nil)
+            try source.insert(db)
+            var file = FileRecord(id: nil, sourceId: source.id!, path: "/tmp/dms-ai-test/a.pdf", name: "a.pdf", ext: "pdf",
+                                  typeIdentifier: nil, size: 1, modified: Date(), created: nil, lastUsed: nil,
+                                  contentHash: nil, textState: .done, scanMark: 1)
+            try file.insert(db)
+            try Analyzer.suggestTag(db, fileId: file.id!, tag: "Rechnung", reason: "KI-Vorschlag")
+        }
+        try organizer.planSuggestions()
+        XCTAssertEqual(try organizer.suggestions(status: [.open]).filter { $0.suggestion.kind == .tag }.count, 1)
+    }
+}
