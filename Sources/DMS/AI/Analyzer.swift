@@ -118,7 +118,7 @@ final class Analyzer: @unchecked Sendable {
         let settings = settings()
         guard settings.enabled, let model = await LocalModel.find(settings: settings) else { return 0 }
         let imageList = TextExtractor.imageExtensions.map { "'\($0)'" }.joined(separator: ",")
-        let files: [FileRecord] = (try? db.reader.read { db in
+        let files: [FileRecord] = (try? await db.reader.read { db in
             try FileRecord.fetchAll(db, sql: """
                 SELECT * FROM file WHERE textState = 'done' AND ext NOT IN (\(imageList))
                   AND NOT EXISTS (SELECT 1 FROM analysis a WHERE a.fileId = file.id)
@@ -134,7 +134,7 @@ final class Analyzer: @unchecked Sendable {
                 NSLog("DMS KI-Fehler bei \(file.name): \(error)")
                 // Fehler merken, damit die Datei nicht endlos neu versucht wird
                 if let id = file.id {
-                    try? db.writer.write { db in
+                    try? await db.writer.write { db in
                         try db.execute(sql: "INSERT OR REPLACE INTO analysis(fileId, summary, labels, model, at) VALUES (?, NULL, NULL, ?, ?)",
                                        arguments: [id, "fehler", Date()])
                     }
