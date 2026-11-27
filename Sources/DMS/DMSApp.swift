@@ -11,6 +11,8 @@ struct DMSApp: App {
             ContentView()
                 .environmentObject(state)
                 .frame(minWidth: 900, minHeight: 460)
+                .preferredColorScheme(.dark)
+                .tint(Theme.accent)
                 .onAppear { state.startBackgroundWork() }
         }
         .commands {
@@ -28,6 +30,8 @@ struct DMSApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        // Dunkles Design der App, unabhängig von der Systemeinstellung
+        NSApp.appearance = NSAppearance(named: .darkAqua)
         // App-Symbol im Dock (Vorlage: docs/AppIcon.svg)
         // Als DMS.app kommt das Symbol aus Info.plist; beim Start aus Xcode setzen wir es hier.
         if !Bundle.main.bundlePath.hasSuffix(".app"),
