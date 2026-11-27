@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2B3A8F"/>
+      <stop offset="0.55" stop-color="#1F6FB2"/>
+      <stop offset="1" stop-color="#12B5A6"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="card1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E6EEF8"/>
+    </linearGradient>
+    <linearGradient id="lens" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFD66B"/>
+      <stop offset="1" stop-color="#FF9F43"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#0A1A40" flood-opacity="0.35"/>
+    </filter>
+    <filter id="iconShadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- macOS-Grundform -->
+  <g filter="url(#iconShadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+  </g>
+
+  <!-- gestapelte Ablage: drei Karten -->
+  <g filter="url(#shadow)">
+    <rect x="270" y="250" width="420" height="300" rx="36" fill="#FFFFFF" fill-opacity="0.35" transform="rotate(-8 480 400)"/>
+    <rect x="280" y="290" width="440" height="320" rx="38" fill="#FFFFFF" fill-opacity="0.6" transform="rotate(-3 500 450)"/>
+    <rect x="290" y="340" width="460" height="340" rx="40" fill="url(#card1)"/>
+    <!-- Tag-Reiter -->
+    <path d="M290 380 a40 40 0 0 1 40 -40 h120 l30 40 z" fill="#E6EEF8"/>
+    <!-- Textzeilen -->
+    <rect x="340" y="420" width="220" height="26" rx="13" fill="#2B3A8F" fill-opacity="0.85"/>
+    <rect x="340" y="470" width="300" height="20" rx="10" fill="#1F6FB2" fill-opacity="0.35"/>
+    <rect x="340" y="510" width="260" height="20" rx="10" fill="#1F6FB2" fill-opacity="0.35"/>
+    <rect x="340" y="550" width="180" height="20" rx="10" fill="#1F6FB2" fill-opacity="0.35"/>
+    <!-- Tag-Chips -->
+    <rect x="340" y="605" width="96" height="36" rx="18" fill="#12B5A6"/>
+    <rect x="448" y="605" width="72" height="36" rx="18" fill="#FF9F43"/>
+  </g>
+
+  <!-- Lupe mit KI-Funkeln -->
+  <g filter="url(#shadow)">
+    <circle cx="660" cy="610" r="118" fill="#FFFFFF" fill-opacity="0.18" stroke="url(#lens)" stroke-width="34"/>
+    <line x1="745" y1="695" x2="830" y2="780" stroke="url(#lens)" stroke-width="44" stroke-linecap="round"/>
+    <path d="M660 548 l16 40 l40 16 l-40 16 l-16 40 l-16 -40 l-40 -16 l40 -16 z" fill="#FFFFFF"/>
+    <path d="M712 540 l7 17 l17 7 l-17 7 l-7 17 l-7 -17 l-17 -7 l17 -7 z" fill="#FFFFFF" fill-opacity="0.9"/>
+  </g>
+</svg>

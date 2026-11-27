@@ -69,6 +69,7 @@ struct SidebarView: View {
             }
 
             Section("Einstellungen") {
+                Label("Lokale KI", systemImage: "sparkles").tag(SidebarItem.ai)
                 Label("Ablage und Versionen", systemImage: "externaldrive.badge.timemachine").tag(SidebarItem.storageSettings)
                 Label("Standard-Apps", systemImage: "app.badge.checkmark").tag(SidebarItem.defaultApps)
             }

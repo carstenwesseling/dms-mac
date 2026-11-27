@@ -9,6 +9,7 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 230)
         } detail: {
             VStack(spacing: 0) {
+                Group {
                 switch state.sidebar {
                 case .dashboard:
                     DashboardView()
@@ -24,9 +25,13 @@ struct ContentView: View {
                     StorageSettingsView()
                 case .log:
                     ActionLogView()
+                case .ai:
+                    AIView()
                 default:
                     FileBrowserView()
                 }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 StatusBar()
             }
         }

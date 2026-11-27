@@ -216,6 +216,7 @@ final class Indexer: @unchecked Sendable {
             }
             try record.update(db)
             try db.execute(sql: "DELETE FROM content WHERE fileId = ?", arguments: [existingId])
+            try db.execute(sql: "DELETE FROM analysis WHERE fileId = ?", arguments: [existingId])
         } else {
             try record.insert(db)
         }

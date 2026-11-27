@@ -153,6 +153,32 @@ final class AppDatabase: @unchecked Sendable {
             }
         }
 
+        migrator.registerMigration("v3-ki") { db in
+            // Ergebnisse der lokalen KI: Zusammenfassung und erkannte Bildinhalte
+            try db.create(table: "analysis") { t in
+                t.primaryKey("fileId", .integer).references("file", onDelete: .cascade)
+                t.column("summary", .text)
+                t.column("labels", .text)
+                t.column("model", .text).notNull()
+                t.column("at", .datetime).notNull()
+            }
+        }
+
+        migrator.registerMigration("v4-ki-nur-dokumente") { db in
+            // Frühere KI-Vorschläge für Code- und Konfigurationsdateien entfernen
+            let docs = Analyzer.documentList
+            try db.execute(sql: """
+                DELETE FROM suggestion WHERE status = 'open' AND reason = 'KI-Vorschlag'
+                  AND fileId IN (SELECT id FROM file WHERE ext NOT IN (\(docs)))
+                """)
+            try db.execute(sql: "DELETE FROM analysis WHERE labels IS NULL AND fileId IN (SELECT id FROM file WHERE ext NOT IN (\(docs)))")
+        }
+
+        migrator.registerMigration("v5-konkrete-bildtags") { db in
+            // Grobe Bildkategorien nicht mehr als Tags vorschlagen
+            try db.execute(sql: "DELETE FROM suggestion WHERE status = 'open' AND reason = 'Bilderkennung'")
+        }
+
         return migrator
     }
 }
@@ -175,10 +201,16 @@ extension AppDatabase {
     }
 
     /// Volltextsuche. Leere Suche liefert die zuletzt geänderten Dateien.
-    func search(_ text: String, sourceId: Int64? = nil, tagId: Int64? = nil, category: FileCategory? = nil, limit: Int = 500) throws -> [FileRow] {
+    func search(_ text: String, sourceId: Int64? = nil, tagId: Int64? = nil, category: FileCategory? = nil,
+                ext: String? = nil, limit: Int = 500) throws -> [FileRow] {
         try reader.read { db in
             var conditions: [String] = []
             var args: [(any DatabaseValueConvertible)?] = []
+
+            if let ext {
+                conditions.append("file.ext = ?")
+                args.append(ext.lowercased())
+            }
 
             if let sourceId {
                 conditions.append("file.sourceId = ?")
@@ -229,6 +261,14 @@ extension AppDatabase {
                         sourceName: row["sourceName"],
                         snippet: Self.cleanSnippet(row["snippet"]))
             }
+        }
+    }
+
+    /// Alle vorkommenden Dateiendungen mit Anzahl, häufigste zuerst.
+    func extensionCounts() throws -> [(ext: String, count: Int)] {
+        try reader.read { db in
+            try Row.fetchAll(db, sql: "SELECT ext, COUNT(*) AS n FROM file WHERE ext <> '' GROUP BY ext ORDER BY n DESC")
+                .map { (ext: $0["ext"], count: $0["n"]) }
         }
     }
 
@@ -363,13 +403,6 @@ extension AppDatabase {
             byCategory[category] = entry
         }
         return byCategory.values.sorted { $0.bytes > $1.bytes }
-    }
-
-    func extensionCounts() throws -> [(ext: String, count: Int)] {
-        try reader.read { db in
-            try Row.fetchAll(db, sql: "SELECT ext, COUNT(*) AS n FROM file WHERE ext != '' GROUP BY ext ORDER BY n DESC")
-                .map { (ext: $0["ext"], count: $0["n"]) }
-        }
     }
 
     func progress() throws -> IndexProgress {

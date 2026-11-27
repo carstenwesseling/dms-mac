@@ -204,7 +204,7 @@ final class Organizer: @unchecked Sendable {
         var autoTags: [(String, [Int64])] = []
 
         let created: Int = try db.writer.write { db in
-            try db.execute(sql: "DELETE FROM suggestion WHERE status = 'open' AND kind IN ('move', 'tag')")
+            try db.execute(sql: "DELETE FROM suggestion WHERE status = 'open' AND (kind = 'move' OR (kind = 'tag' AND reason LIKE 'Regel%'))")
 
             var ruleMatches: [(Rule, Set<Int64>)] = []
             for rule in rules { ruleMatches.append((rule, try self.matches(rule, in: db))) }
