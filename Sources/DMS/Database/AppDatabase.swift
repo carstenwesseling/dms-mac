@@ -405,13 +405,6 @@ extension AppDatabase {
         return byCategory.values.sorted { $0.bytes > $1.bytes }
     }
 
-    func extensionCounts() throws -> [(ext: String, count: Int)] {
-        try reader.read { db in
-            try Row.fetchAll(db, sql: "SELECT ext, COUNT(*) AS n FROM file WHERE ext != '' GROUP BY ext ORDER BY n DESC")
-                .map { (ext: $0["ext"], count: $0["n"]) }
-        }
-    }
-
     func progress() throws -> IndexProgress {
         try reader.read { db in
             IndexProgress(
