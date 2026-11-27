@@ -181,6 +181,7 @@ final class AppState: ObservableObject {
             while true {
                 var work = analyzer.tagImages(limit: 10)
                 work += await analyzer.summarizePending(limit: 1)
+                work += await analyzer.describeImages(limit: 1)
                 if work == 0 {
                     try? await Task.sleep(for: .seconds(30))
                 }

@@ -6,6 +6,7 @@ struct AIView: View {
     @State private var settings = AISettings()
     @State private var modelName: String?
     @State private var checking = true
+    @State private var visionAvailable = false
     @State private var counts = (summaries: 0, pendingDocs: 0, images: 0)
     @State private var structure: String?
     @State private var structureRunning = false
@@ -30,6 +31,13 @@ struct AIView: View {
                 }
                 LabeledContent("Zusammenfassungen", value: "\(counts.summaries) erstellt, \(counts.pendingDocs) offen")
                 LabeledContent("Bilder erkannt", value: "\(counts.images)")
+                LabeledContent("Bildmodell") {
+                    if visionAvailable {
+                        Label(settings.visionModel, systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    } else {
+                        Text("fehlt: im Terminal `ollama pull \(settings.visionModel)`").foregroundStyle(.orange)
+                    }
+                }
                 Text("Alles läuft auf diesem Mac. Vorgeschlagene Tags findest du unter „Ablagevorschläge“.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Erneut prüfen") { Task { await refresh() } }
@@ -37,7 +45,8 @@ struct AIView: View {
 
             Section("Einstellungen") {
                 Toggle("Dokumente automatisch zusammenfassen", isOn: $settings.enabled)
-                TextField("Ollama-Modell", text: $settings.ollamaModel)
+                TextField("Ollama-Modell (Text)", text: $settings.ollamaModel)
+                TextField("Ollama-Modell (Bilder)", text: $settings.visionModel)
                 TextField("Ollama-Adresse", text: $settings.ollamaURL)
                 Text("Ist Apple Intelligence verfügbar, wird automatisch Apples Modell genutzt.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -77,10 +86,12 @@ struct AIView: View {
         let analyzer = state.analyzer
         let current = settings
         let result = await Task.detached {
-            (await LocalModel.find(settings: current)?.name, analyzer.counts())
+            let vision = URL(string: current.ollamaURL).map { OllamaClient(baseURL: $0, model: current.visionModel) }
+            return (await LocalModel.find(settings: current)?.name, analyzer.counts(), await vision?.isAvailable() ?? false)
         }.value
         modelName = result.0
         counts = result.1
+        visionAvailable = result.2
         checking = false
     }
 

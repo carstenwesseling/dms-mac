@@ -153,3 +153,16 @@ final class AnalyzerTests: XCTestCase {
         XCTAssertEqual(try organizer.suggestions(status: [.open]).filter { $0.suggestion.kind == .tag }.count, 1)
     }
 }
+
+final class GenericTagTests: XCTestCase {
+    func testGenericTagsAreFiltered() {
+        let parsed = Analyzer.parse("ZUSAMMENFASSUNG: Hafen bei Sonnenuntergang.\nSCHLAGWÖRTER: Foto, Hamburger Hafen, Bildschirmfoto, Elbphilharmonie, Mensch")
+        XCTAssertEqual(parsed.tags, ["Hamburger Hafen", "Elbphilharmonie"])
+    }
+
+    func testOldSettingsStillDecode() throws {
+        let old = #"{"enabled":true,"ollamaURL":"http://localhost:11434","ollamaModel":"qwen2.5:3b"}"#
+        let decoded = try JSONDecoder().decode(AISettings.self, from: Data(old.utf8))
+        XCTAssertEqual(decoded.visionModel, "qwen2.5vl:3b")
+    }
+}

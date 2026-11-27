@@ -174,6 +174,11 @@ final class AppDatabase: @unchecked Sendable {
             try db.execute(sql: "DELETE FROM analysis WHERE labels IS NULL AND fileId IN (SELECT id FROM file WHERE ext NOT IN (\(docs)))")
         }
 
+        migrator.registerMigration("v5-konkrete-bildtags") { db in
+            // Grobe Bildkategorien nicht mehr als Tags vorschlagen
+            try db.execute(sql: "DELETE FROM suggestion WHERE status = 'open' AND reason = 'Bilderkennung'")
+        }
+
         return migrator
     }
 }

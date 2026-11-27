@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import GRDB
 import Vision
@@ -87,13 +88,104 @@ final class Analyzer: @unchecked Sendable {
                     }
                     try AppDatabase.reindexFTS(db, fileId: id)
                 }
-                for label in labels.prefix(3) where label.confidence >= 0.5 {
-                    try Self.suggestTag(db, fileId: id, tag: label.name, reason: "Bilderkennung")
-                }
+                // Die groben Kategorien dienen nur der Suche; konkrete Tags kommen aus describeImages()
             }
         }
         return files.count
     }
+
+    /// Lässt ein Bildmodell (Ollama, z. B. qwen2.5vl) das Foto ansehen und konkrete Tags vorschlagen.
+    /// Ohne Bildmodell werden Screenshots und Scans über ihren erkannten Text ausgewertet.
+    func describeImages(limit: Int = 1) async -> Int {
+        let settings = settings()
+        guard settings.enabled, let reachable = try? db.sources().filter(\.isReachable).compactMap(\.id), !reachable.isEmpty,
+              let base = URL(string: settings.ollamaURL) else { return 0 }
+        let visionClient = OllamaClient(baseURL: base, model: settings.visionModel)
+        let hasVision = await visionClient.isAvailable()
+        let textModel = hasVision ? nil : await LocalModel.find(settings: settings)
+        guard hasVision || textModel != nil else { return 0 }
+
+        let imageList = TextExtractor.imageExtensions.map { "'\($0)'" }.joined(separator: ",")
+        let rows: [(FileRecord, String, String)] = (try? await db.reader.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT file.*, a.labels AS aLabels, COALESCE(c.body, '') AS cBody FROM file
+                JOIN analysis a ON a.fileId = file.id
+                LEFT JOIN content c ON c.fileId = file.id
+                WHERE file.ext IN (\(imageList)) AND a.model = 'vision'
+                  AND file.sourceId IN (\(reachable.map(String.init).joined(separator: ",")))
+                ORDER BY file.modified DESC LIMIT ?
+                """, arguments: [limit]).map { (try FileRecord(row: $0), ($0["aLabels"] as String?) ?? "", $0["cBody"] as String) }
+        }) ?? []
+
+        var done = 0
+        for (file, labels, body) in rows {
+            guard let id = file.id else { continue }
+            let ocr = body.components(separatedBy: "\nBildinhalt:").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            var answer: String?
+            var modelName = "vision-fertig"
+            do {
+                if hasVision, let jpeg = Self.jpegBase64(file.url) {
+                    answer = try await visionClient.generate(system: Self.systemPrompt, prompt: Self.imagePrompt(file: file, labels: labels, ocr: ocr), images: [jpeg])
+                    modelName = "Ollama: \(settings.visionModel)"
+                } else if let textModel, ocr.count >= 40 {
+                    // Screenshot oder Scan: über den erkannten Text
+                    answer = try await textModel.complete(system: Self.systemPrompt, prompt: Self.imagePrompt(file: file, labels: labels, ocr: ocr))
+                    modelName = textModel.name
+                }
+            } catch {
+                NSLog("DMS Bildbeschreibung fehlgeschlagen für \(file.name): \(error)")
+            }
+            let parsed = answer.map(Self.parse)
+            try? await db.writer.write { db in
+                try db.execute(sql: "UPDATE analysis SET summary = ?, model = ?, at = ? WHERE fileId = ?",
+                               arguments: [parsed?.summary, modelName, Date(), id])
+                if let parsed {
+                    if !parsed.summary.isEmpty {
+                        let extra = "Beschreibung: " + parsed.summary + " " + parsed.tags.joined(separator: " ")
+                        try db.execute(sql: "UPDATE content SET body = body || ? WHERE fileId = ?", arguments: ["\n" + extra, id])
+                        try AppDatabase.reindexFTS(db, fileId: id)
+                    }
+                    for tag in parsed.tags.prefix(5) {
+                        try Self.suggestTag(db, fileId: id, tag: tag, reason: "KI-Vorschlag")
+                    }
+                }
+            }
+            done += 1
+        }
+        return done
+    }
+
+    static func imagePrompt(file: FileRecord, labels: String, ocr: String) -> String {
+        var context = "Dateiname: \(file.name)\nAufgenommen/geändert: \(file.modified.formatted(.dateTime.year().month(.wide)))"
+        if !labels.isEmpty { context += "\nGrobe Bildkategorien: \(labels)" }
+        if !ocr.isEmpty { context += "\nText im Bild:\n\(ocr.prefix(2000))" }
+        return """
+            \(context)
+
+            Aufgabe: Beschreibe in einem Satz, was konkret zu sehen ist bzw. worum es geht.
+            Nenne danach 3 bis 5 KONKRETE Schlagwörter, die beim späteren Suchen helfen: \
+            Ort oder Sehenswürdigkeit, Anlass oder Ereignis, Firma oder Absender, Produkt, Tier- oder Pflanzenart, Thema. \
+            Verboten sind allgemeine Wörter wie Bild, Foto, Bildschirmfoto, Screenshot, Dokument, Text, Mensch, Person, Draußen, Drinnen. \
+            Bei Screenshots: Name der App oder Webseite und das Thema.
+            Antworte genau in diesem Format:
+            ZUSAMMENFASSUNG: <Satz>
+            SCHLAGWÖRTER: <Wort>, <Wort>, <Wort>
+            """
+    }
+
+    /// Bild verkleinert als JPEG (Base64) für das Bildmodell.
+    static func jpegBase64(_ url: URL) -> String? {
+        guard let image = TextExtractor.loadImage(url, maxPixel: 1024) else { return nil }
+        let rep = NSBitmapImageRep(cgImage: image)
+        return rep.representation(using: .jpeg, properties: [.compressionFactor: 0.8])?.base64EncodedString()
+    }
+
+    /// Zu allgemeine Begriffe, die bei der Suche nicht weiterhelfen.
+    static let genericTags: Set<String> = [
+        "bild", "bilder", "foto", "fotos", "bildschirmfoto", "screenshot", "dokument", "dokumente", "datei", "text",
+        "mensch", "menschen", "person", "personen", "draußen", "drinnen", "objekt", "inhalt", "sonstiges", "allgemein",
+        "papier", "information", "informationen", "seite", "grafik", "abbildung", "aufnahme",
+    ]
 
     struct Label { var name: String; var confidence: Float }
 
@@ -163,8 +255,9 @@ final class Analyzer: @unchecked Sendable {
             Inhalt:
             \(text.prefix(6000))
 
-            Aufgabe: Fasse den Inhalt in 2 bis 3 Sätzen zusammen. Nenne danach 3 bis 5 kurze Schlagwörter, \
-            die sich als Ordner-Tags eignen (z. B. Rechnung, Versicherung, Steuer 2024, Auto).
+            Aufgabe: Fasse den Inhalt in 2 bis 3 Sätzen zusammen. Nenne danach 3 bis 5 KONKRETE Schlagwörter, \
+            die beim Wiederfinden helfen: Absender oder Firma, Art des Dokuments, Thema, Jahr \
+            (z. B. Telekom, Stromrechnung, Kfz-Versicherung, Steuer 2024). Keine allgemeinen Wörter wie Dokument, Text oder Datei.
             Antworte genau in diesem Format:
             ZUSAMMENFASSUNG: <Text>
             SCHLAGWÖRTER: <Wort>, <Wort>, <Wort>
@@ -197,7 +290,7 @@ final class Analyzer: @unchecked Sendable {
                 let value = line.split(separator: ":", maxSplits: 1).dropFirst().first.map(String.init) ?? ""
                 tags = value.split(separator: ",")
                     .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " .#\"'")) }
-                    .filter { !$0.isEmpty && $0.count <= 30 }
+                    .filter { !$0.isEmpty && $0.count <= 30 && !genericTags.contains($0.lowercased()) }
             } else if inSummary, !line.isEmpty {
                 summaryLines.append(line)
             }

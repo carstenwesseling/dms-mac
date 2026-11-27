@@ -8,8 +8,21 @@ struct AISettings: Codable, Equatable, Sendable {
     var enabled: Bool = true
     var ollamaURL: String = "http://localhost:11434"
     var ollamaModel: String = "qwen2.5:3b"
+    /// Bildmodell für konkrete Bild-Tags (sieht das Foto selbst an)
+    var visionModel: String = "qwen2.5vl:3b"
 
     static let key = "ai"
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = AISettings()
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? d.enabled
+        ollamaURL = try c.decodeIfPresent(String.self, forKey: .ollamaURL) ?? d.ollamaURL
+        ollamaModel = try c.decodeIfPresent(String.self, forKey: .ollamaModel) ?? d.ollamaModel
+        visionModel = try c.decodeIfPresent(String.self, forKey: .visionModel) ?? d.visionModel
+    }
 }
 
 /// Ein lokales Sprachmodell. Inhalte verlassen den Mac nicht.
@@ -94,17 +107,19 @@ struct OllamaClient: Sendable {
         return try JSONDecoder().decode(Tags.self, from: data).models.map(\.name)
     }
 
-    func generate(system: String, prompt: String) async throws -> String {
+    /// `images`: Base64-kodierte Bilder für Bildmodelle (z. B. qwen2.5vl).
+    func generate(system: String, prompt: String, images: [String] = []) async throws -> String {
         var request = URLRequest(url: baseURL.appendingPathComponent("api/generate"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": model,
             "system": system,
             "prompt": prompt,
             "stream": false,
             "options": ["temperature": 0.2, "num_ctx": 8192],
         ]
+        if !images.isEmpty { body["images"] = images }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, _) = try await Self.session.data(for: request)
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
