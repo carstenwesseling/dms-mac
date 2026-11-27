@@ -39,6 +39,9 @@ final class AppState: ObservableObject {
     @Published var browseMode: BrowseMode = .list
     /// Nach „In den Ordner springen“: diese Datei in der Ordneransicht aufklappen und zeigen
     @Published var revealPath: String?
+    /// Ausgeschnittene oder kopierte Dateien und Ordner für „Einfügen“
+    @Published var clipboard: (urls: [URL], cut: Bool)?
+    @Published var fileOperationRunning = false
     @Published var rows: [FileRow] = []
     @Published var selection: Set<Int64> = []
     @Published var status: String = ""
@@ -129,6 +132,55 @@ final class AppState: ObservableObject {
         filterCategory = nil
         filterExt = nil
         filterKind = nil
+    }
+
+    // MARK: - Dateien und Ordner bearbeiten
+
+    func copyToClipboard(_ urls: [URL], cut: Bool) {
+        guard !urls.isEmpty else { return }
+        clipboard = (urls, cut)
+        // Auch für den Finder: dort lassen sich kopierte Dateien einsetzen
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.writeObjects(urls as [NSURL])
+        status = "\(urls.count) Element(e) \(cut ? "ausgeschnitten" : "kopiert")"
+    }
+
+    func paste(into folder: URL) {
+        guard let clip = clipboard else { return }
+        if clip.cut {
+            move(clip.urls, into: folder)
+            clipboard = nil
+        } else {
+            copy(clip.urls, into: folder)
+        }
+    }
+
+    func move(_ urls: [URL], into folder: URL) {
+        runFileOperation("verschoben") { $0.move(urls, into: folder) }
+    }
+
+    func copy(_ urls: [URL], into folder: URL) {
+        runFileOperation("kopiert") { $0.copy(urls, into: folder) }
+    }
+
+    func trash(_ urls: [URL]) {
+        runFileOperation("in den Papierkorb gelegt") { $0.trash(urls) }
+        selection = []
+    }
+
+    private func runFileOperation(_ verb: String, _ work: @escaping @Sendable (Organizer) -> Organizer.Outcome) {
+        let organizer = self.organizer
+        fileOperationRunning = true
+        Task {
+            let outcome = await Task.detached(priority: .userInitiated) { work(organizer) }.value
+            fileOperationRunning = false
+            status = "\(outcome.done) Element(e) \(verb)"
+            if !outcome.errors.isEmpty {
+                errorMessage = "Nicht alles hat geklappt:\n" + outcome.errors.joined(separator: "\n")
+            }
+            search()
+        }
     }
 
     // MARK: - Sprünge

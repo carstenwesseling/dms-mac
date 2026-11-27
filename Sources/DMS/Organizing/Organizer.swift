@@ -392,6 +392,10 @@ final class Organizer: @unchecked Sendable {
             try db.execute(sql: "UPDATE fileVersion SET originalPath = ? WHERE originalPath = ?", arguments: [entry.fromPath, entry.toPath])
         }
         let sources = try db.sources()
+        // Beim Zurückverschieben Pfade im Index mitnehmen, damit Tags und Text erhalten bleiben
+        if entry.kind == "move", FileManager.default.fileExists(atPath: entry.fromPath) {
+            try? updateIndex(from: entry.toPath, to: entry.fromPath, sources: sources)
+        }
         indexer.refresh(paths: [entry.fromPath, entry.toPath], sources: sources)
     }
 

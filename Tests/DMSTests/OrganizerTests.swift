@@ -44,6 +44,48 @@ final class OrganizerTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: src, encoding: .utf8), "Hallo")
     }
 
+    func testMoveFolderKeepsIndexAndTags() throws {
+        let db = try AppDatabase.inMemory()
+        let organizer = Organizer(db: db, indexer: Indexer(db: db))
+        let file = try makeFile("Quelle/Fotos/Urlaub/bild.txt", "Strand")
+        let target = tmp.appendingPathComponent("Quelle/Archiv")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        var fileId: Int64 = 0
+        try db.writer.write { db in
+            var source = Source(id: nil, name: "Quelle", kind: .local, path: self.tmp.appendingPathComponent("Quelle").path,
+                                remoteURL: nil, lastScan: nil)
+            try source.insert(db)
+            var rec = FileRecord(id: nil, sourceId: source.id!, path: file.path, name: "bild.txt", ext: "txt", typeIdentifier: nil,
+                                 size: 6, modified: Date(), created: nil, lastUsed: nil, contentHash: nil, textState: .done, scanMark: 1)
+            try rec.insert(db)
+            fileId = rec.id!
+        }
+        try db.addTag("Strand", to: [fileId])
+
+        let folder = tmp.appendingPathComponent("Quelle/Fotos")
+        let outcome = organizer.move([folder, file], into: target)
+        XCTAssertEqual(outcome.errors, [])
+        XCTAssertEqual(outcome.done, 1, "Datei im mitverschobenen Ordner zählt nicht doppelt")
+        let newPath = target.appendingPathComponent("Fotos/Urlaub/bild.txt").path
+        XCTAssertTrue(FileManager.default.fileExists(atPath: newPath))
+        let moved = try db.reader.read { db in try FileRecord.fetchOne(db, key: fileId) }
+        XCTAssertEqual(moved?.path, newPath)
+        XCTAssertEqual(try db.search("Strand").count, 1, "Tag bleibt erhalten")
+
+        let copy = organizer.copy([target.appendingPathComponent("Fotos")], into: tmp.appendingPathComponent("Quelle"))
+        XCTAssertEqual(copy.done, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("Quelle/Fotos/Urlaub/bild.txt").path))
+    }
+
+    func testMoveIntoItselfIsRefused() throws {
+        let db = try AppDatabase.inMemory()
+        let organizer = Organizer(db: db, indexer: Indexer(db: db))
+        _ = try makeFile("A/B/x.txt", "x")
+        let outcome = organizer.move([tmp.appendingPathComponent("A")], into: tmp.appendingPathComponent("A/B"))
+        XCTAssertEqual(outcome.done, 0)
+        XCTAssertEqual(outcome.errors.count, 1)
+    }
+
     func testUniqueNameDoesNotOverwrite() throws {
         _ = try makeFile("x/Datei.pdf", "1")
         let unique = FileOps.uniqueURL(for: tmp.appendingPathComponent("x/Datei.pdf"))
