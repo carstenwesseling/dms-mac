@@ -29,7 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         // App-Symbol im Dock (Vorlage: docs/AppIcon.svg)
-        if let url = Bundle.module.url(forResource: "AppIcon", withExtension: "png"),
+        // Als DMS.app kommt das Symbol aus Info.plist; beim Start aus Xcode setzen wir es hier.
+        if !Bundle.main.bundlePath.hasSuffix(".app"),
+           let url = Bundle.module.url(forResource: "AppIcon", withExtension: "png"),
            let icon = NSImage(contentsOf: url) {
             NSApp.applicationIconImage = icon
         }

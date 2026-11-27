@@ -20,7 +20,19 @@ Konzept: siehe das Konzeptdokument im Projekt.
 
 Noch nicht enthalten (Schritte 3 und 4): Dubletten, Ablagevorschläge, Regeln, Versionen, lokale KI.
 
-## Starten
+## Als eigenständige App installieren
+
+Im Terminal:
+
+```
+cd ~/Developer/dms-mac
+git pull
+./scripts/build-app.sh
+```
+
+Danach liegt **DMS** im Programme-Ordner und startet wie jede andere App (Launchpad, Spotlight, Dock). Xcode und Terminal werden dafür nicht gebraucht. Für ein Update dieselben drei Befehle erneut ausführen; Index, Tags und Einstellungen bleiben erhalten.
+
+## Starten aus Xcode (Entwicklung)
 
 Voraussetzung: macOS 15 oder neuer, Xcode.
 
