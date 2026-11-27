@@ -23,7 +23,10 @@ let package = Package(
         ),
         .testTarget(
             name: "DMSTests",
-            dependencies: ["DMS"],
+            dependencies: [
+                "DMS",
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ],
             path: "Tests/DMSTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
