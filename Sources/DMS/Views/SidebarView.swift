@@ -6,20 +6,20 @@ struct SidebarView: View {
     var body: some View {
         List(selection: $state.sidebar) {
             Section("Übersicht") {
-                Label("Dashboard", systemImage: "chart.pie").tag(SidebarItem.dashboard)
-                Label("Alle Dateien", systemImage: "doc.on.doc").tag(SidebarItem.allFiles)
+                NavLabel("Dashboard", systemImage: "chart.pie").tag(SidebarItem.dashboard)
+                NavLabel("Alle Dateien", systemImage: "doc.on.doc").tag(SidebarItem.allFiles)
             }
 
             Section("Ordnen") {
-                Label("Ablagevorschläge", systemImage: "tray.and.arrow.down").tag(SidebarItem.suggestions)
-                Label("Dubletten", systemImage: "doc.on.doc.fill").tag(SidebarItem.duplicates)
-                Label("Regeln", systemImage: "list.bullet.rectangle").tag(SidebarItem.rules)
-                Label("Protokoll", systemImage: "clock.arrow.circlepath").tag(SidebarItem.log)
+                NavLabel("Ablagevorschläge", systemImage: "tray.and.arrow.down").tag(SidebarItem.suggestions)
+                NavLabel("Dubletten", systemImage: "doc.on.doc.fill").tag(SidebarItem.duplicates)
+                NavLabel("Regeln", systemImage: "list.bullet.rectangle").tag(SidebarItem.rules)
+                NavLabel("Protokoll", systemImage: "clock.arrow.circlepath").tag(SidebarItem.log)
             }
 
             Section("Dateitypen") {
                 ForEach(FileCategory.allCases, id: \.self) { category in
-                    Label(category.rawValue, systemImage: category.systemImage)
+                    NavLabel(category.rawValue, systemImage: category.systemImage)
                         .tag(SidebarItem.category(category))
                 }
             }
@@ -28,7 +28,7 @@ struct SidebarView: View {
                 ForEach(state.sources) { source in
                     if let id = source.id {
                         HStack {
-                            Label(source.name, systemImage: source.kind.systemImage)
+                            NavLabel(source.name, systemImage: source.kind.systemImage)
                             Spacer()
                             if !source.isReachable {
                                 Text("offline").font(.caption).foregroundStyle(.secondary)
@@ -53,7 +53,7 @@ struct SidebarView: View {
                 Button {
                     state.addSourceWithPanel()
                 } label: {
-                    Label("Ordner hinzufügen …", systemImage: "plus")
+                    NavLabel("Ordner hinzufügen …", systemImage: "plus")
                 }
                 .buttonStyle(.borderless)
             }
@@ -62,19 +62,21 @@ struct SidebarView: View {
                 Section("Tags") {
                     ForEach(state.tags) { tag in
                         if let id = tag.id {
-                            Label(tag.name, systemImage: "tag").tag(SidebarItem.tag(id))
+                            NavLabel(tag.name, systemImage: "tag").tag(SidebarItem.tag(id))
                         }
                     }
                 }
             }
 
             Section("Einstellungen") {
-                Label("Lokale KI", systemImage: "sparkles").tag(SidebarItem.ai)
-                Label("Ablage und Versionen", systemImage: "externaldrive.badge.timemachine").tag(SidebarItem.storageSettings)
-                Label("Standard-Apps", systemImage: "app.badge.checkmark").tag(SidebarItem.defaultApps)
+                NavLabel("Lokale KI", systemImage: "sparkles").tag(SidebarItem.ai)
+                NavLabel("Ablage und Versionen", systemImage: "externaldrive.badge.timemachine").tag(SidebarItem.storageSettings)
+                NavLabel("Standard-Apps", systemImage: "app.badge.checkmark").tag(SidebarItem.defaultApps)
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(Theme.sidebar)
     }
 }
 

@@ -6,7 +6,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 200, ideal: 230)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 250)
         } detail: {
             VStack(spacing: 0) {
                 Group {
@@ -34,6 +34,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 StatusBar()
             }
+            .background(Theme.background)
         }
         .toolbar {
             ToolbarItemGroup {
