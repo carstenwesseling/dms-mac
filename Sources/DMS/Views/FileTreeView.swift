@@ -289,16 +289,14 @@ private struct NodeRow: View {
 }
 
 /// Zeile als Datei ziehbar machen (auch in den Finder).
+/// `itemProvider` ist die Listen-Variante von macOS: Ein Klick markiert die Zeile weiterhin,
+/// erst Ziehen startet den Drag (`onDrag` hätte jeden Klick abgefangen).
 private struct DragSource: ViewModifier {
     let path: String
     let enabled: Bool
 
     func body(content: Content) -> some View {
-        if enabled {
-            content.onDrag { NSItemProvider(object: URL(fileURLWithPath: path) as NSURL) }
-        } else {
-            content
-        }
+        content.itemProvider(enabled ? { NSItemProvider(object: URL(fileURLWithPath: path) as NSURL) } : nil)
     }
 }
 
