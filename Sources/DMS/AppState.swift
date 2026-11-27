@@ -33,6 +33,12 @@ final class AppState: ObservableObject {
     @Published var filterSourceId: Int64?
     @Published var filterCategory: FileCategory?
     @Published var filterExt: String?
+    /// Nur Dateien eines Speicherorts (Mac, NAS, Google Drive), z. B. nach einem Sprung aus dem Dashboard
+    @Published var filterKind: SourceKind?
+    /// Darstellung der Dateien: Liste, Ordnerstruktur oder Gruppen
+    @Published var browseMode: BrowseMode = .list
+    /// Nach „In den Ordner springen“: diese Datei in der Ordneransicht aufklappen und zeigen
+    @Published var revealPath: String?
     @Published var rows: [FileRow] = []
     @Published var selection: Set<Int64> = []
     @Published var status: String = ""
@@ -91,12 +97,16 @@ final class AppState: ObservableObject {
             // Unbekannte Quelle: id -1 liefert bewusst keine Treffer
             sourceId = source(named: name)?.id ?? -1
         }
+        let kind = filterKind
+        // Ordner und Gruppen brauchen alle Dateien, die Liste zeigt die besten Treffer
+        let limit = browseMode == .list ? 500 : 50_000
         let db = self.db
         searchTask = Task {
             if debounce { try? await Task.sleep(for: .milliseconds(250)) }
             if Task.isCancelled { return }
             let result = await Task.detached(priority: .userInitiated) {
-                (try? db.search(text, sourceId: sourceId, tagId: tagId, category: category, ext: ext)) ?? []
+                (try? db.search(text, sourceId: sourceId, tagId: tagId, category: category, ext: ext,
+                                kind: kind, limit: limit)) ?? []
             }.value
             if Task.isCancelled { return }
             self.rows = result
@@ -112,12 +122,69 @@ final class AppState: ObservableObject {
             ?? sources.first { $0.name.lowercased().contains(n) }
     }
 
-    var hasActiveFilter: Bool { filterSourceId != nil || filterCategory != nil || filterExt != nil }
+    var hasActiveFilter: Bool { filterSourceId != nil || filterCategory != nil || filterExt != nil || filterKind != nil }
 
     func clearFilters() {
         filterSourceId = nil
         filterCategory = nil
         filterExt = nil
+        filterKind = nil
+    }
+
+    // MARK: - Sprünge
+
+    /// Alle Dateien eines Speicherorts als Ordnerstruktur zeigen (aus dem Dashboard).
+    func showFiles(kind: SourceKind) {
+        clearFilters()
+        query = ""
+        filterKind = kind
+        browseMode = .folders
+        sidebar = .allFiles
+        search()
+    }
+
+    /// Eine Quelle als Ordnerstruktur zeigen.
+    func showFolders(sourceId: Int64) {
+        clearFilters()
+        query = ""
+        browseMode = .folders
+        sidebar = .source(sourceId)
+        search()
+    }
+
+    func showCategory(_ category: FileCategory) {
+        clearFilters()
+        query = ""
+        browseMode = .list
+        sidebar = .category(category)
+        search()
+    }
+
+    /// Zur Datei in ihrem Ordner springen: Quelle wählen, Ordneransicht, Pfad aufklappen.
+    func jumpToFolder(_ row: FileRow) {
+        clearFilters()
+        query = ""
+        browseMode = .folders
+        revealPath = row.file.path
+        selection = [row.id]
+        if sidebar == .source(row.file.sourceId) {
+            search()
+        } else {
+            sidebar = .source(row.file.sourceId)
+            search()
+        }
+    }
+
+    /// Dateien am Speicherort löschen: Sie wandern in den Papierkorb (auf dem NAS in „DMS-Papierkorb“)
+    /// und lassen sich im Protokoll wiederherstellen.
+    func delete(_ rows: [FileRow]) {
+        let errors = organizer.trashDuplicates(rows.compactMap(\.file.id))
+        selection.subtract(rows.map(\.id))
+        if !errors.isEmpty {
+            errorMessage = "Nicht gelöscht:\n" + errors.joined(separator: "\n")
+        }
+        status = errors.isEmpty ? "\(rows.count) Datei(en) in den Papierkorb gelegt" : status
+        search()
     }
 
     // MARK: - Quellen

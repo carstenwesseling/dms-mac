@@ -11,7 +11,10 @@ struct FileBrowserView: View {
             VStack(spacing: 0) {
                 FilterBar()
                 Divider()
-                fileTable
+                switch state.browseMode {
+                case .list: fileTable
+                case .folders, .groups: FileTreeView(mode: state.browseMode)
+                }
             }
                 .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
                 .layoutPriority(1)
@@ -32,6 +35,8 @@ struct FileBrowserView: View {
             state.search()
         }
         .onChange(of: state.filterExt) { state.search() }
+        .onChange(of: state.filterKind) { state.search() }
+        .onChange(of: state.browseMode) { state.search() }
     }
 
     private var fileTable: some View {
@@ -63,6 +68,9 @@ struct FileBrowserView: View {
         .contextMenu(forSelectionType: Int64.self) { ids in
             let rows = state.rows.filter { ids.contains($0.id) }
             Button("Öffnen") { rows.forEach(state.open) }
+            if let first = rows.first, rows.count == 1 {
+                Button("In den Ordner springen") { state.jumpToFolder(first) }
+            }
             Button("Im Finder zeigen") { state.reveal(rows) }
         } primaryAction: { ids in
             state.rows.filter { ids.contains($0.id) }.forEach(state.open)
@@ -115,6 +123,27 @@ struct FilterBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            Picker("Ansicht", selection: $state.browseMode) {
+                ForEach(BrowseMode.allCases) { mode in
+                    Label(mode.label, systemImage: mode.systemImage).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .help("Liste, Ordnerstruktur oder Gruppen gleichnamiger Dateien (z. B. ein Album)")
+
+            if let kind = state.filterKind {
+                Button {
+                    state.filterKind = nil
+                } label: {
+                    Label(kind == .nas ? "CAWServer" : kind.label, systemImage: "xmark.circle.fill")
+                }
+                .buttonStyle(.bordered)
+                .tint(Theme.accent)
+                .help("Filter auf diesen Speicherort aufheben")
+            }
+
             Picker("Quelle", selection: $state.filterSourceId) {
                 Text("Alle Quellen").tag(Int64?.none)
                 Divider()
@@ -170,6 +199,7 @@ struct FileDetailView: View {
     let rows: [FileRow]
     @State private var newTag = ""
     @State private var fileTags: [Tag] = []
+    @State private var confirmDelete = false
 
     var body: some View {
         Group {
@@ -183,6 +213,16 @@ struct FileDetailView: View {
         }
         .onAppear(perform: loadTags)
         .onChange(of: rows.map(\.id)) { loadTags() }
+        .confirmationDialog(deleteTitle, isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("In den Papierkorb legen", role: .destructive) { state.delete(rows) }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Die Datei wird an ihrem Speicherort gelöscht und landet im Papierkorb (auf CAWServer im Ordner „DMS-Papierkorb“). Im Protokoll kannst du das rückgängig machen.")
+        }
+    }
+
+    private var deleteTitle: String {
+        rows.count == 1 ? "„\(rows[0].file.name)“ löschen?" : "\(rows.count) Dateien löschen?"
     }
 
     private func single(_ row: FileRow) -> some View {
@@ -202,7 +242,11 @@ struct FileDetailView: View {
                     Text(row.file.name).font(.headline).textSelection(.enabled)
                     HStack {
                         Button("Öffnen") { state.open(row) }
-                        Button("Im Finder zeigen") { state.reveal([row]) }
+                        Button("In den Ordner springen") { state.jumpToFolder(row) }
+                        Spacer()
+                        Button(role: .destructive) { confirmDelete = true } label: {
+                            Label("Löschen", systemImage: "trash")
+                        }
                     }
                     tagEditor
                     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
@@ -234,6 +278,9 @@ struct FileDetailView: View {
             Text(ByteCountFormatter.string(fromByteCount: rows.reduce(0) { $0 + $1.file.size }, countStyle: .file))
                 .foregroundStyle(.secondary)
             tagEditor
+            Button(role: .destructive) { confirmDelete = true } label: {
+                Label("\(rows.count) Dateien löschen", systemImage: "trash")
+            }
             Spacer()
         }
         .padding()

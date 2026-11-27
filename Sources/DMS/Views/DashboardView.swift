@@ -7,6 +7,7 @@ struct DashboardView: View {
     @State private var sourceStats: [SourceStats] = []
     @State private var categoryStats: [CategoryStats] = []
     @State private var insights = DashboardInsights()
+    @State private var selectedAngle: Int64?
 
     private let gap: CGFloat = 16
 
@@ -45,8 +46,13 @@ struct DashboardView: View {
             }
         }
         .background(Theme.background)
-        .task { await load() }
-        .onChange(of: state.progress.total) { Task { await load() } }
+        .task {
+            // Regelmäßig aktualisieren, solange das Dashboard offen ist
+            while !Task.isCancelled {
+                await load()
+                try? await Task.sleep(for: .seconds(20))
+            }
+        }
     }
 
     // MARK: Kopf
@@ -102,6 +108,11 @@ struct DashboardView: View {
                 .padding(.top, 8)
             }
         }
+        .drillDown("Alle Dateien zeigen, neueste zuerst") {
+            state.clearFilters()
+            state.browseMode = .list
+            state.sidebar = .allFiles
+        }
     }
 
     private func delta(_ title: String, _ now: Int, _ before: Int, _ beforeText: String) -> some View {
@@ -156,6 +167,16 @@ struct DashboardView: View {
                             .cornerRadius(3)
                             .foregroundStyle(color(for: slice.kind))
                     }
+                    .chartAngleSelection(value: $selectedAngle)
+                    .onChange(of: selectedAngle) {
+                        guard let value = selectedAngle else { return }
+                        var acc: Int64 = 0
+                        for slice in slices {
+                            acc += slice.bytes
+                            if value <= acc { state.showFiles(kind: slice.kind); break }
+                        }
+                        selectedAngle = nil
+                    }
                     .chartBackground { _ in
                         let parts = Format.bytesParts(total)
                         VStack(spacing: 0) {
@@ -176,7 +197,9 @@ struct DashboardView: View {
                                 Spacer(minLength: 4)
                                 Text(Format.percent(total > 0 ? Double(slice.bytes) / Double(total) : 0))
                                     .font(.system(size: 13, weight: .light)).monospacedDigit()
+                                Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(Theme.textTertiary)
                             }
+                            .drillDown("Dateistruktur dieses Speicherorts öffnen") { state.showFiles(kind: slice.kind) }
                         }
                     }
                 }
@@ -205,6 +228,7 @@ struct DashboardView: View {
                 Text("Nicht verfügbar").foregroundStyle(Theme.textSecondary)
             }
         }
+        .drillDown("Dateien auf dem Mac als Ordnerstruktur zeigen") { state.showFiles(kind: .local) }
     }
 
     // MARK: Dateitypen
@@ -226,6 +250,7 @@ struct DashboardView: View {
                         .font(.system(size: 12))
                         TickBar(fraction: Double(item.bytes) / Double(maxBytes))
                     }
+                    .drillDown("\(item.category.rawValue) zeigen") { state.showCategory(item.category) }
                 }
                 if top.isEmpty {
                     Text("Noch keine Dateien erfasst.").foregroundStyle(Theme.textSecondary)
@@ -239,12 +264,17 @@ struct DashboardView: View {
     private var duplicates: some View {
         let parts = Format.bytesParts(insights.duplicateBytes)
         return stat("Dubletten", parts.0, "\(parts.1) doppelt", "\(insights.duplicateFiles.formatted()) Dateien")
+            .drillDown("Dubletten ansehen") { state.sidebar = .duplicates }
     }
 
     private var searchable: some View {
         let total = max(state.progress.total, 1)
         let share = Double(state.progress.withText) / Double(total)
         return stat("Durchsuchbar", "\(Int((share * 100).rounded()))", "%", "\(state.progress.withText.formatted()) mit Text")
+            .drillDown("Alle Dateien zeigen") {
+                state.clearFilters()
+                state.sidebar = .allFiles
+            }
     }
 
     private func stat(_ title: String, _ value: String, _ unit: String, _ note: String) -> some View {
@@ -305,6 +335,9 @@ struct DashboardView: View {
                 .font(.system(size: 14))
                 .monospacedDigit()
                 .padding(.vertical, 9)
+                .drillDown("\(stats.source.name) als Ordnerstruktur öffnen") {
+                    if let id = stats.source.id { state.showFolders(sourceId: id) }
+                }
             }
             if sourceStats.isEmpty {
                 Text("Noch keine Quellen eingebunden.").foregroundStyle(Theme.textSecondary).padding(.vertical, 12)

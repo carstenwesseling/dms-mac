@@ -202,10 +202,15 @@ extension AppDatabase {
 
     /// Volltextsuche. Leere Suche liefert die zuletzt geänderten Dateien.
     func search(_ text: String, sourceId: Int64? = nil, tagId: Int64? = nil, category: FileCategory? = nil,
-                ext: String? = nil, limit: Int = 500) throws -> [FileRow] {
+                ext: String? = nil, kind: SourceKind? = nil, limit: Int = 500) throws -> [FileRow] {
         try reader.read { db in
             var conditions: [String] = []
             var args: [(any DatabaseValueConvertible)?] = []
+
+            if let kind {
+                conditions.append("file.sourceId IN (SELECT id FROM source WHERE kind = ?)")
+                args.append(kind.rawValue)
+            }
 
             if let ext {
                 conditions.append("file.ext = ?")
