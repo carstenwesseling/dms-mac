@@ -4,7 +4,7 @@ Ein lokales Datenmanagement-System für den Mac, das über den Finder hinausgeht
 
 Konzept: siehe das Konzeptdokument im Projekt.
 
-## Stand: Schritt 2 (Grundgerüst)
+## Funktionen
 
 - Quellen einbinden: Ordner auf dem Mac, NAS-Freigaben (werden beim Start bei Bedarf neu verbunden) und den Google-Drive-Ordner. Die Art wird automatisch erkannt.
 - Scan und Index in einer lokalen SQLite-Datenbank (`~/Library/Application Support/DMS/dms.sqlite`).
@@ -18,7 +18,11 @@ Konzept: siehe das Konzeptdokument im Projekt.
 - Dashboard: belegter und freier Speicher je Quelle, Dateitypen nach Größe.
 - Standard-Apps pro Dateityp ändern.
 
-Noch nicht enthalten (Schritte 3 und 4): Dubletten, Ablagevorschläge, Regeln, Versionen, lokale KI.
+- Dubletten über alle Quellen (SHA-256), mit Empfehlung, welche Kopie bleibt.
+- Ablagevorschläge nach Nutzung (Mac bis 60 Tage, Google Drive bis 6 Monate, danach CAWServer) und feste Ablage je Thema. Verschoben wird nur nach Bestätigung, jede Aktion lässt sich rückgängig machen.
+- Regeln für automatische Tags und Ablageziele.
+- Versionen in einem Versionsordner auf dem CAWServer.
+- Lokale KI (Ollama mit Qwen, oder Apples Modell, falls verfügbar): Zusammenfassungen, konkrete Tags für Dokumente und Bilder, Vorschlag für eine Ordnerstruktur. Keine Daten verlassen den Mac.
 
 ## Als eigenständige App installieren
 
