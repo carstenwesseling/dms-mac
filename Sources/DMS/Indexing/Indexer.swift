@@ -116,9 +116,34 @@ final class Indexer: @unchecked Sendable {
         count += batch.count
         progress?(count)
 
-        // Was beim Scan nicht mehr gefunden wurde, ist gelöscht oder verschoben worden
+        // Was beim Scan nicht gefunden wurde, ist vermutlich gelöscht oder verschoben worden.
+        // Auf dem NAS können Ordner beim Auflisten aber auch nur kurz nicht antworten; deshalb jede
+        // fehlende Datei einzeln prüfen und nur entfernen, wenn sie wirklich weg ist. So bleiben
+        // Prüfsummen, Texte und Tags bei Netzwerkaussetzern erhalten.
+        let missing: [(Int64, String)] = try db.reader.read { db in
+            try Row.fetchAll(db, sql: "SELECT id, path FROM file WHERE sourceId = ? AND scanMark != ?", arguments: [sourceId, mark])
+                .map { ($0["id"], $0["path"]) }
+        }
+        guard source.isReachable else { return count }
+        let fm = FileManager.default
+        var gone: [Int64] = []
+        var still: [Int64] = []
+        for (id, path) in missing {
+            if fm.fileExists(atPath: path) { still.append(id) } else { gone.append(id) }
+        }
+        // Ist die Quelle während der Prüfung weggefallen, lieber nichts löschen
+        guard source.isReachable else { return count }
         try db.writer.write { db in
-            try db.execute(sql: "DELETE FROM file WHERE sourceId = ? AND scanMark != ?", arguments: [sourceId, mark])
+            for chunk in gone.chunked(into: 400) {
+                try db.execute(sql: "DELETE FROM file WHERE id IN (\(chunk.map { _ in "?" }.joined(separator: ",")))",
+                               arguments: StatementArguments(chunk))
+            }
+            for chunk in still.chunked(into: 400) {
+                var args: [Int64] = [mark]
+                args += chunk
+                try db.execute(sql: "UPDATE file SET scanMark = ? WHERE id IN (\(chunk.map { _ in "?" }.joined(separator: ",")))",
+                               arguments: StatementArguments(args))
+            }
             try db.execute(sql: "UPDATE source SET lastScan = ? WHERE id = ?", arguments: [Date(), sourceId])
         }
         return count
@@ -303,9 +328,9 @@ final class Indexer: @unchecked Sendable {
             }
         } catch { return 0 }
 
-        // Mehrere Dateien gleichzeitig lesen; das meiste ist Warten auf Netzwerk und Texterkennung
+        // Viele Dateien gleichzeitig lesen: die meiste Zeit wartet die App auf das NAS, nicht auf die CPU
         let results = Locked([(TextState, TextExtractor.Result?)?](repeating: nil, count: files.count))
-        DispatchQueue.concurrentPerform(iterations: files.count) { i in
+        Self.parallel(files.count, width: Self.readWidth) { i in
             let file = files[i]
             var state: TextState
             var result: TextExtractor.Result?
@@ -343,6 +368,28 @@ final class Indexer: @unchecked Sendable {
 extension Array {
     func chunked(into size: Int) -> [[Element]] {
         stride(from: 0, to: count, by: size).map { Array(self[$0..<Swift.min($0 + size, count)]) }
+    }
+}
+
+extension Indexer {
+    /// Gleichzeitige Lesevorgänge bei der Texterkennung
+    static let readWidth = 16
+
+    /// Führt `body` für 0..<count aus, höchstens `width` gleichzeitig, und wartet auf alle.
+    /// Anders als concurrentPerform nicht auf die Zahl der Kerne begrenzt.
+    static func parallel(_ count: Int, width: Int, _ body: @escaping @Sendable (Int) -> Void) {
+        guard count > 0 else { return }
+        let queue = DispatchQueue(label: "dms.parallel", qos: .utility, attributes: .concurrent)
+        let slots = DispatchSemaphore(value: width)
+        let group = DispatchGroup()
+        for i in 0..<count {
+            slots.wait()
+            queue.async(group: group) {
+                defer { slots.signal() }
+                body(i)
+            }
+        }
+        group.wait()
     }
 }
 
