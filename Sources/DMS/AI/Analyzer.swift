@@ -138,9 +138,10 @@ final class Analyzer: @unchecked Sendable {
                 NSLog("DMS Bildbeschreibung fehlgeschlagen für \(file.name): \(error)")
             }
             let parsed = answer.map(Self.parse)
+            let usedModel = modelName
             try? await db.writer.write { db in
                 try db.execute(sql: "UPDATE analysis SET summary = ?, model = ?, at = ? WHERE fileId = ?",
-                               arguments: [parsed?.summary, modelName, Date(), id])
+                               arguments: [parsed?.summary, usedModel, Date(), id])
                 if let parsed {
                     if !parsed.summary.isEmpty {
                         let extra = "Beschreibung: " + parsed.summary + " " + parsed.tags.joined(separator: " ")
