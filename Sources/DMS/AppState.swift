@@ -15,6 +15,7 @@ enum SidebarItem: Hashable {
     case storageSettings
     case log
     case ai
+    case processing
 }
 
 /// Zentrale Steuerung der App: Quellen, Suche, Auswahl, Hintergrundarbeit.
@@ -57,6 +58,11 @@ final class AppState: ObservableObject {
     private var watcher: FolderWatcher?
     private var searchTask: Task<Void, Never>?
     private var backgroundStarted = false
+    private var captureWorker: Task<Void, Never>?
+    private var taggingWorker: Task<Void, Never>?
+    /// Wann die Hintergrundarbeit zuletzt etwas erledigt hat (für die Anzeige „läuft“)
+    @Published var lastCaptureWork: Date?
+    @Published var lastTaggingWork: Date?
 
     init() {
         do {
@@ -333,37 +339,8 @@ final class AppState: ObservableObject {
         restartWatcher()
         scanAll()
 
-        // Text auslesen, OCR, Prüfsummen, Versionen und freigegebene Vorschläge, solange etwas offen ist
-        let indexer = self.indexer
-        let organizer = self.organizer
-        Task.detached(priority: .background) {
-            var lastQueueRun = Date.distantPast
-            while true {
-                var work = indexer.extractPending(limit: 20)
-                work += organizer.hashCandidates(limit: 40)
-                work += organizer.snapshotVersions(limit: 10)
-                if Date().timeIntervalSince(lastQueueRun) > 60 {
-                    organizer.processQueue()
-                    lastQueueRun = Date()
-                }
-                if work == 0 {
-                    try? await Task.sleep(for: .seconds(15))
-                }
-            }
-        }
-
-        // Lokale KI: Bilder erkennen, Dokumente zusammenfassen (nur wenn ein Modell verfügbar ist)
-        let analyzer = self.analyzer
-        Task.detached(priority: .background) {
-            while true {
-                var work = analyzer.tagImages(limit: 10)
-                work += await analyzer.summarizePending(limit: 1)
-                work += await analyzer.describeImages(limit: 1)
-                if work == 0 {
-                    try? await Task.sleep(for: .seconds(30))
-                }
-            }
-        }
+        startCaptureWorker()
+        startTaggingWorker()
 
         // Fortschritt anzeigen
         Task {
@@ -387,6 +364,70 @@ final class AppState: ObservableObject {
                 self.planSuggestions()
             }
         }
+    }
+
+    /// Text auslesen, OCR, Prüfsummen, Versionen und freigegebene Vorschläge, solange etwas offen ist.
+    private func startCaptureWorker() {
+        captureWorker?.cancel()
+        let indexer = self.indexer
+        let organizer = self.organizer
+        captureWorker = Task.detached(priority: .background) { [weak self] in
+            var lastQueueRun = Date.distantPast
+            while !Task.isCancelled {
+                var work = indexer.extractPending(limit: 20)
+                work += organizer.hashCandidates(limit: 40)
+                work += organizer.snapshotVersions(limit: 10)
+                if Date().timeIntervalSince(lastQueueRun) > 60 {
+                    organizer.processQueue()
+                    lastQueueRun = Date()
+                }
+                if work > 0 {
+                    await MainActor.run { self?.markWork(\.lastCaptureWork) }
+                } else {
+                    try? await Task.sleep(for: .seconds(15))
+                }
+            }
+        }
+    }
+
+    /// Lokale KI: Bilder erkennen, Dokumente zusammenfassen (nur wenn ein Modell verfügbar ist).
+    private func startTaggingWorker() {
+        taggingWorker?.cancel()
+        let analyzer = self.analyzer
+        taggingWorker = Task.detached(priority: .background) { [weak self] in
+            while !Task.isCancelled {
+                var work = analyzer.tagImages(limit: 10)
+                work += await analyzer.summarizePending(limit: 1)
+                work += await analyzer.describeImages(limit: 1)
+                if work > 0 {
+                    await MainActor.run { self?.markWork(\.lastTaggingWork) }
+                } else {
+                    try? await Task.sleep(for: .seconds(30))
+                }
+            }
+        }
+    }
+
+    /// Höchstens alle 10 Sekunden veröffentlichen, sonst zeichnen alle Ansichten ständig neu.
+    private func markWork(_ key: ReferenceWritableKeyPath<AppState, Date?>) {
+        if let last = self[keyPath: key], last.timeIntervalSinceNow > -10 { return }
+        self[keyPath: key] = Date()
+    }
+
+    /// Alle Quellen neu einlesen und Dateien, die nicht gelesen werden konnten, erneut versuchen.
+    func restartCapture() {
+        let reset = (try? db.resetFailedCapture()) ?? 0
+        restartWatcher()
+        scanAll()
+        startCaptureWorker()
+        status = reset > 0 ? "Datenerfassung neu gestartet, \(reset) Dateien werden erneut gelesen" : "Datenerfassung neu gestartet"
+    }
+
+    /// Tagging neu anstoßen: fehlgeschlagene KI-Auswertungen erneut versuchen.
+    func restartTagging() {
+        let reset = (try? db.resetFailedTagging()) ?? 0
+        startTaggingWorker()
+        status = reset > 0 ? "Tagging neu gestartet, \(reset) Dateien werden erneut ausgewertet" : "Tagging neu gestartet"
     }
 
     private func restartWatcher() {

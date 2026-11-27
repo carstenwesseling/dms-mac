@@ -228,3 +228,32 @@ final class DashboardInsightsTests: XCTestCase {
         XCTAssertEqual(insights.duplicateBytes, 10)
     }
 }
+
+final class ProcessingTests: XCTestCase {
+    func testRestartResetsOnlyFailures() throws {
+        let db = try AppDatabase.inMemory()
+        try db.writer.write { db in
+            var source = Source(id: nil, name: "Q", kind: .local, path: "/q", remoteURL: nil, lastScan: nil)
+            try source.insert(db)
+            let states: [(TextState, String?)] = [(.failed, ""), (.done, "abc"), (.done, nil), (.empty, nil)]
+            for (i, (state, hash)) in states.enumerated() {
+                var f = FileRecord(id: nil, sourceId: source.id!, path: "/q/\(i).pdf", name: "\(i).pdf", ext: "pdf",
+                                   typeIdentifier: nil, size: 10, modified: Date(), created: nil, lastUsed: nil,
+                                   contentHash: hash, textState: state, scanMark: 1)
+                try f.insert(db)
+            }
+            try db.execute(sql: "INSERT INTO analysis(fileId, summary, labels, model, at) VALUES (2, NULL, NULL, 'fehler', ?)", arguments: [Date()])
+            try db.execute(sql: "INSERT INTO analysis(fileId, summary, labels, model, at) VALUES (3, 'Rechnung', 'Strom', 'qwen', ?)", arguments: [Date()])
+        }
+        XCTAssertEqual(try db.processingStats().textFailed, 1)
+        XCTAssertEqual(try db.processingStats().aiFailed, 1)
+        XCTAssertEqual(try db.resetFailedCapture(), 2)
+        XCTAssertEqual(try db.resetFailedTagging(), 1)
+        let s = try db.processingStats()
+        XCTAssertEqual(s.textFailed, 0)
+        XCTAssertEqual(s.hashFailed, 0)
+        XCTAssertEqual(s.textPending, 1)
+        XCTAssertEqual(s.aiFailed, 0)
+        XCTAssertEqual(s.docsDone, 1)
+    }
+}
