@@ -29,7 +29,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        // Fenster nach vorne holen (beim Start aus Xcode liegt es sonst oft hinter Xcode)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows.first { $0.canBecomeMain }?.makeKeyAndOrderFront(nil)
+        }
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    /// App bleibt offen, auch wenn das Fenster geschlossen wird (über das Dock wieder öffnen).
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
