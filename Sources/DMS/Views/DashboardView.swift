@@ -7,6 +7,7 @@ struct DashboardView: View {
     @State private var sourceStats: [SourceStats] = []
     @State private var categoryStats: [CategoryStats] = []
     @State private var insights = DashboardInsights()
+    @State private var processing = ProcessingStats()
 
     private let gap: CGFloat = 16
 
@@ -38,6 +39,8 @@ struct DashboardView: View {
                         }
                         .frame(height: 250)
                     }
+                    HStack(spacing: gap) { captureCard; taggingCard }
+                        .frame(height: 150)
                     sourcesTable
                 }
                 .padding(28)
@@ -308,6 +311,47 @@ struct DashboardView: View {
         .cardBackground()
     }
 
+    // MARK: Hintergrundarbeit
+
+    private var captureCard: some View {
+        let open = processing.textPending
+        let total = max(processing.total, 1)
+        return progressCard("Datenerfassung", fraction: Double(total - open) / Double(total),
+                            last: state.lastCaptureWork, open: open,
+                            note: "\(open.formatted()) Dateien offen · \(processing.textFailed.formatted()) nicht lesbar")
+            .drillDown("Erfassung und Tagging öffnen") { state.sidebar = .processing }
+    }
+
+    private var taggingCard: some View {
+        let done = processing.imagesTagged + processing.docsDone
+        let open = processing.imagesPending + processing.docsPending
+        return progressCard("Tagging (lokale KI)", fraction: Double(done) / Double(max(done + open, 1)),
+                            last: state.lastTaggingWork, open: open,
+                            note: "\(processing.imagesTagged.formatted()) Bilder, \(processing.docsDone.formatted()) Dokumente · \(open.formatted()) offen")
+            .drillDown("Erfassung und Tagging öffnen") { state.sidebar = .processing }
+    }
+
+    private func progressCard(_ title: String, fraction: Double, last: Date?, open: Int, note: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(title).font(.system(size: 14, weight: .medium))
+                Spacer()
+                ActivityBadge(last: last, open: open).font(.system(size: 12))
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(Int((fraction * 100).rounded(.down)))").font(.system(size: 36, weight: .thin)).monospacedDigit()
+                Text("%").font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
+                Spacer(minLength: 4)
+                Text(note).font(.system(size: 12)).foregroundStyle(Theme.textTertiary).lineLimit(1)
+            }
+            TickBar(fraction: fraction)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .cardBackground()
+    }
+
     // MARK: Quellen
 
     private var sourcesTable: some View {
@@ -367,8 +411,10 @@ struct DashboardView: View {
         let storage = state.organizer.settings()
         let result = await Task.detached(priority: .userInitiated) {
             ((try? db.sourceStats()) ?? [], (try? db.categoryStats()) ?? [],
-             (try? db.dashboardInsights(settings: storage)) ?? DashboardInsights())
+             (try? db.dashboardInsights(settings: storage)) ?? DashboardInsights(),
+             (try? db.processingStats()) ?? ProcessingStats())
         }.value
+        processing = result.3
         sourceStats = result.0
         categoryStats = result.1
         insights = result.2

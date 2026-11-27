@@ -292,18 +292,21 @@ final class Indexer: @unchecked Sendable {
 
         let files: [FileRecord]
         do {
+            // Dateien auf dem Mac zuerst, das NAS danach; jeweils neueste zuerst
             files = try db.reader.read { db in
-                try FileRecord
-                    .filter(Column("textState") == TextState.pending.rawValue)
-                    .filter(reachable.contains(Column("sourceId")))
-                    .order(Column("modified").desc)
-                    .limit(limit)
-                    .fetchAll(db)
+                try FileRecord.fetchAll(db, sql: """
+                    SELECT file.* FROM file JOIN source ON source.id = file.sourceId
+                    WHERE file.textState = 'pending' AND file.sourceId IN (\(reachable.map(String.init).joined(separator: ",")))
+                    ORDER BY CASE source.kind WHEN 'local' THEN 0 WHEN 'googleDrive' THEN 1 ELSE 2 END, file.modified DESC
+                    LIMIT ?
+                    """, arguments: [limit])
             }
         } catch { return 0 }
 
-        for file in files {
-            guard let id = file.id else { continue }
+        // Mehrere Dateien gleichzeitig lesen; das meiste ist Warten auf Netzwerk und Texterkennung
+        let results = Locked([(TextState, TextExtractor.Result?)?](repeating: nil, count: files.count))
+        DispatchQueue.concurrentPerform(iterations: files.count) { i in
+            let file = files[i]
             var state: TextState
             var result: TextExtractor.Result?
             do {
@@ -312,6 +315,13 @@ final class Indexer: @unchecked Sendable {
             } catch {
                 state = .failed
             }
+            results.withLock { $0[i] = (state, result) }
+        }
+
+        let finished = results.withLock { $0 }
+        for (file, entry) in zip(files, finished) {
+            guard let id = file.id, let entry else { continue }
+            let (state, result) = entry
             do {
                 try db.writer.write { db in
                     if let result, state == .done {
@@ -332,5 +342,16 @@ final class Indexer: @unchecked Sendable {
 extension Array {
     func chunked(into size: Int) -> [[Element]] {
         stride(from: 0, to: count, by: size).map { Array(self[$0..<Swift.min($0 + size, count)]) }
+    }
+}
+
+/// Einfacher, threadsicherer Behälter für Ergebnisse aus parallelen Läufen.
+final class Locked<Value>: @unchecked Sendable {
+    private var value: Value
+    private let lock = NSLock()
+    init(_ value: Value) { self.value = value }
+    func withLock<T>(_ body: (inout Value) -> T) -> T {
+        lock.lock(); defer { lock.unlock() }
+        return body(&value)
     }
 }

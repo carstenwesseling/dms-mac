@@ -9,7 +9,7 @@ struct ProcessingView: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Status") { activity(state.lastCaptureWork, open: stats.textPending) }
+                LabeledContent("Status") { ActivityBadge(last: state.lastCaptureWork, open: stats.textPending) }
                 LabeledContent("Dateien im Index", value: stats.total.formatted())
                 LabeledContent("Text noch offen", value: stats.textPending.formatted())
                 LabeledContent("Nicht lesbar", value: "\(stats.textFailed.formatted()) Texte, \(stats.hashFailed.formatted()) Prüfsummen")
@@ -26,7 +26,7 @@ struct ProcessingView: View {
             }
 
             Section {
-                LabeledContent("Status") { activity(state.lastTaggingWork, open: stats.imagesPending + stats.docsPending) }
+                LabeledContent("Status") { ActivityBadge(last: state.lastTaggingWork, open: stats.imagesPending + stats.docsPending) }
                 LabeledContent("Bilder", value: "\(stats.imagesTagged.formatted()) getaggt, \(stats.imagesPending.formatted()) offen")
                 LabeledContent("Dokumente", value: "\(stats.docsDone.formatted()) zusammengefasst, \(stats.docsPending.formatted()) offen")
                 LabeledContent("Fehlgeschlagen", value: stats.aiFailed.formatted())
@@ -62,13 +62,18 @@ struct ProcessingView: View {
             if let s = await Task.detached(operation: { try? db.processingStats() }).value, s != stats { stats = s }
         }
     }
+}
 
-    @ViewBuilder
-    private func activity(_ last: Date?, open: Int) -> some View {
+/// „läuft“, „wartet“ oder „fertig“, je nachdem wann zuletzt etwas erledigt wurde.
+struct ActivityBadge: View {
+    let last: Date?
+    let open: Int
+
+    var body: some View {
         if let last, last.timeIntervalSinceNow > -90 {
             Label("läuft", systemImage: "circle.fill").foregroundStyle(Theme.positive)
         } else if open > 0 {
-            Label("wartet (\(open.formatted()) offen)", systemImage: "pause.circle").foregroundStyle(.orange)
+            Label("wartet", systemImage: "pause.circle").foregroundStyle(.orange)
         } else {
             Label("fertig", systemImage: "checkmark.circle").foregroundStyle(.secondary)
         }

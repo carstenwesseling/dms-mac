@@ -257,3 +257,12 @@ final class ProcessingTests: XCTestCase {
         XCTAssertEqual(s.docsDone, 1)
     }
 }
+
+final class PhotoTextTests: XCTestCase {
+    func testQuickTextCheck() {
+        XCTAssertFalse(OCR.looksLikeText(""))
+        XCTAssertFalse(OCR.looksLikeText("Il ."))
+        XCTAssertFalse(OCR.looksLikeText("EXIT"))
+        XCTAssertTrue(OCR.looksLikeText("Rechnung Nr. 2024-118\nStadtwerke München\nBetrag 84,20 EUR"))
+    }
+}
