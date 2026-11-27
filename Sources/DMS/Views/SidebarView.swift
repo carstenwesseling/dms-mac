@@ -69,6 +69,7 @@ struct SidebarView: View {
             }
 
             Section("Einstellungen") {
+                NavLabel("Erfassung und Tagging", systemImage: "arrow.triangle.2.circlepath").tag(SidebarItem.processing)
                 NavLabel("Lokale KI", systemImage: "sparkles").tag(SidebarItem.ai)
                 NavLabel("Ablage und Versionen", systemImage: "externaldrive.badge.timemachine").tag(SidebarItem.storageSettings)
                 NavLabel("Standard-Apps", systemImage: "app.badge.checkmark").tag(SidebarItem.defaultApps)

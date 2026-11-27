@@ -116,9 +116,34 @@ final class Indexer: @unchecked Sendable {
         count += batch.count
         progress?(count)
 
-        // Was beim Scan nicht mehr gefunden wurde, ist gelöscht oder verschoben worden
+        // Was beim Scan nicht gefunden wurde, ist vermutlich gelöscht oder verschoben worden.
+        // Auf dem NAS können Ordner beim Auflisten aber auch nur kurz nicht antworten; deshalb jede
+        // fehlende Datei einzeln prüfen und nur entfernen, wenn sie wirklich weg ist. So bleiben
+        // Prüfsummen, Texte und Tags bei Netzwerkaussetzern erhalten.
+        let missing: [(Int64, String)] = try db.reader.read { db in
+            try Row.fetchAll(db, sql: "SELECT id, path FROM file WHERE sourceId = ? AND scanMark != ?", arguments: [sourceId, mark])
+                .map { ($0["id"], $0["path"]) }
+        }
+        guard source.isReachable else { return count }
+        let fm = FileManager.default
+        var gone: [Int64] = []
+        var still: [Int64] = []
+        for (id, path) in missing {
+            if fm.fileExists(atPath: path) { still.append(id) } else { gone.append(id) }
+        }
+        // Ist die Quelle während der Prüfung weggefallen, lieber nichts löschen
+        guard source.isReachable else { return count }
         try db.writer.write { db in
-            try db.execute(sql: "DELETE FROM file WHERE sourceId = ? AND scanMark != ?", arguments: [sourceId, mark])
+            for chunk in gone.chunked(into: 400) {
+                try db.execute(sql: "DELETE FROM file WHERE id IN (\(chunk.map { _ in "?" }.joined(separator: ",")))",
+                               arguments: StatementArguments(chunk))
+            }
+            for chunk in still.chunked(into: 400) {
+                var args: [Int64] = [mark]
+                args += chunk
+                try db.execute(sql: "UPDATE file SET scanMark = ? WHERE id IN (\(chunk.map { _ in "?" }.joined(separator: ",")))",
+                               arguments: StatementArguments(args))
+            }
             try db.execute(sql: "UPDATE source SET lastScan = ? WHERE id = ?", arguments: [Date(), sourceId])
         }
         return count
@@ -236,7 +261,17 @@ final class Indexer: @unchecked Sendable {
     /// Aktualisiert den Index für geänderte Pfade, ohne die ganze Quelle neu zu scannen.
     func refresh(paths: [String], sources: [Source]) {
         let fm = FileManager.default
-        for path in Set(paths) {
+        var knownCache: [Int64: [String: Known]] = [:]
+        func cachedKnown(_ sourceId: Int64) throws -> [String: Known] {
+            if let cached = knownCache[sourceId] { return cached }
+            let loaded = try knownFiles(sourceId: sourceId)
+            knownCache[sourceId] = loaded
+            return loaded
+        }
+        // Nur oberste Pfade: ein Ordner deckt Änderungen darin ab
+        let unique = Set(paths)
+        let topPaths = unique.filter { path in !unique.contains { path.hasPrefix($0 + "/") } }
+        for path in topPaths {
             guard let source = sources.first(where: { path == $0.path || path.hasPrefix($0.path + "/") }),
                   let sourceId = source.id else { continue }
             var isDir: ObjCBool = false
@@ -247,7 +282,7 @@ final class Indexer: @unchecked Sendable {
                         try db.execute(sql: "DELETE FROM file WHERE path = ? OR path LIKE ?", arguments: [path, path + "/%"])
                     }
                 } else if isDir.boolValue {
-                    var known = try knownFiles(sourceId: sourceId)
+                    var known = try cachedKnown(sourceId)
                     let mark = Int64(Date().timeIntervalSince1970 * 1000)
                     var batch: [FileInfo] = []
                     if let en = fm.enumerator(at: URL(fileURLWithPath: path), includingPropertiesForKeys: Array(Self.resourceKeys),
@@ -257,10 +292,12 @@ final class Indexer: @unchecked Sendable {
                         }
                     }
                     try write(batch, sourceId: sourceId, kind: source.kind, mark: mark, known: &known)
+                    knownCache[sourceId] = known
                 } else if let info = Self.info(for: URL(fileURLWithPath: path)) {
-                    var known = try knownFiles(sourceId: sourceId)
+                    var known = try cachedKnown(sourceId)
                     let mark = Int64(Date().timeIntervalSince1970 * 1000)
                     try write([info], sourceId: sourceId, kind: source.kind, mark: mark, known: &known)
+                    knownCache[sourceId] = known
                 }
             } catch {
                 NSLog("DMS refresh failed for \(path): \(error)")
@@ -280,18 +317,21 @@ final class Indexer: @unchecked Sendable {
 
         let files: [FileRecord]
         do {
+            // Dateien auf dem Mac zuerst, das NAS danach; jeweils neueste zuerst
             files = try db.reader.read { db in
-                try FileRecord
-                    .filter(Column("textState") == TextState.pending.rawValue)
-                    .filter(reachable.contains(Column("sourceId")))
-                    .order(Column("modified").desc)
-                    .limit(limit)
-                    .fetchAll(db)
+                try FileRecord.fetchAll(db, sql: """
+                    SELECT file.* FROM file JOIN source ON source.id = file.sourceId
+                    WHERE file.textState = 'pending' AND file.sourceId IN (\(reachable.map(String.init).joined(separator: ",")))
+                    ORDER BY CASE source.kind WHEN 'local' THEN 0 WHEN 'googleDrive' THEN 1 ELSE 2 END, file.modified DESC
+                    LIMIT ?
+                    """, arguments: [limit])
             }
         } catch { return 0 }
 
-        for file in files {
-            guard let id = file.id else { continue }
+        // Viele Dateien gleichzeitig lesen: die meiste Zeit wartet die App auf das NAS, nicht auf die CPU
+        let results = Locked([(TextState, TextExtractor.Result?)?](repeating: nil, count: files.count))
+        Self.parallel(files.count, width: Self.readWidth) { i in
+            let file = files[i]
             var state: TextState
             var result: TextExtractor.Result?
             do {
@@ -300,8 +340,16 @@ final class Indexer: @unchecked Sendable {
             } catch {
                 state = .failed
             }
-            do {
-                try db.writer.write { db in
+            results.withLock { $0[i] = (state, result) }
+        }
+
+        let finished = results.withLock { $0 }
+        // Alles in einem Schreibvorgang sichern statt einzeln pro Datei
+        do {
+            try db.writer.write { db in
+                for (file, entry) in zip(files, finished) {
+                    guard let id = file.id, let entry else { continue }
+                    let (state, result) = entry
                     if let result, state == .done {
                         try db.execute(sql: "INSERT OR REPLACE INTO content(fileId, body, method) VALUES (?, ?, ?)",
                                        arguments: [id, result.text, result.method])
@@ -309,9 +357,9 @@ final class Indexer: @unchecked Sendable {
                     try db.execute(sql: "UPDATE file SET textState = ? WHERE id = ?", arguments: [state.rawValue, id])
                     try AppDatabase.reindexFTS(db, fileId: id)
                 }
-            } catch {
-                NSLog("DMS could not save text for \(file.path): \(error)")
             }
+        } catch {
+            NSLog("DMS could not save extracted text: \(error)")
         }
         return files.count
     }
@@ -320,5 +368,38 @@ final class Indexer: @unchecked Sendable {
 extension Array {
     func chunked(into size: Int) -> [[Element]] {
         stride(from: 0, to: count, by: size).map { Array(self[$0..<Swift.min($0 + size, count)]) }
+    }
+}
+
+extension Indexer {
+    /// Gleichzeitige Lesevorgänge bei der Texterkennung
+    static let readWidth = 6
+
+    /// Führt `body` für 0..<count aus, höchstens `width` gleichzeitig, und wartet auf alle.
+    /// Anders als concurrentPerform nicht auf die Zahl der Kerne begrenzt.
+    static func parallel(_ count: Int, width: Int, _ body: @escaping @Sendable (Int) -> Void) {
+        guard count > 0 else { return }
+        let queue = DispatchQueue(label: "dms.parallel", qos: .utility, attributes: .concurrent)
+        let slots = DispatchSemaphore(value: width)
+        let group = DispatchGroup()
+        for i in 0..<count {
+            slots.wait()
+            queue.async(group: group) {
+                defer { slots.signal() }
+                body(i)
+            }
+        }
+        group.wait()
+    }
+}
+
+/// Einfacher, threadsicherer Behälter für Ergebnisse aus parallelen Läufen.
+final class Locked<Value>: @unchecked Sendable {
+    private var value: Value
+    private let lock = NSLock()
+    init(_ value: Value) { self.value = value }
+    func withLock<T>(_ body: (inout Value) -> T) -> T {
+        lock.lock(); defer { lock.unlock() }
+        return body(&value)
     }
 }

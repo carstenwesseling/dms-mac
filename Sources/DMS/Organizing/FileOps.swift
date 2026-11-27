@@ -72,7 +72,9 @@ enum FileOps {
     /// erst dann das Original in den Papierkorb legen.
     static func safeMove(from source: URL, to target: URL) throws -> MoveResult {
         let fm = FileManager.default
-        guard fm.fileExists(atPath: source.path) else { throw OpError.sourceMissing(source.path) }
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: source.path, isDirectory: &isDir) else { throw OpError.sourceMissing(source.path) }
+        if isDir.boolValue { return try safeMoveFolder(from: source, to: target) }
         let targetDir = target.deletingLastPathComponent()
         if !isReachable(targetDir.path) {
             throw OpError.targetUnreachable(targetDir.path)
@@ -98,6 +100,48 @@ enum FileOps {
         }
         let trash = try moveToTrash(source)
         return MoveResult(finalPath: finalURL.path, trashPath: trash)
+    }
+
+    /// Verschiebt einen Ordner. Gleiches Laufwerk: umbenennen. Sonst kopieren, Anzahl und Größe
+    /// aller Dateien vergleichen und erst dann das Original in den Papierkorb legen.
+    static func safeMoveFolder(from source: URL, to target: URL) throws -> MoveResult {
+        let fm = FileManager.default
+        let targetDir = target.deletingLastPathComponent()
+        if !isReachable(targetDir.path) { throw OpError.targetUnreachable(targetDir.path) }
+        try fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
+        let finalURL = uniqueURL(for: target)
+        if sameVolume(source, targetDir) {
+            try fm.moveItem(at: source, to: finalURL)
+            return MoveResult(finalPath: finalURL.path, trashPath: nil)
+        }
+        let tempURL = targetDir.appendingPathComponent(".dms-\(UUID().uuidString).tmp")
+        do {
+            try fm.copyItem(at: source, to: tempURL)
+            guard folderFingerprint(source) == folderFingerprint(tempURL) else {
+                throw OpError.verificationFailed(finalURL.path)
+            }
+            try fm.moveItem(at: tempURL, to: finalURL)
+        } catch {
+            try? fm.removeItem(at: tempURL)
+            throw error
+        }
+        let trash = try moveToTrash(source)
+        return MoveResult(finalPath: finalURL.path, trashPath: trash)
+    }
+
+    /// Anzahl Dateien und Gesamtgröße eines Ordners, zum Prüfen einer Kopie.
+    static func folderFingerprint(_ url: URL) -> (Int, Int64) {
+        var count = 0
+        var size: Int64 = 0
+        let en = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey])
+        while let item = en?.nextObject() as? URL {
+            let values = try? item.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            if values?.isRegularFile == true {
+                count += 1
+                size += Int64(values?.fileSize ?? 0)
+            }
+        }
+        return (count, size)
     }
 
     /// Legt eine Datei in den Papierkorb. Auf Netzlaufwerken ohne Papierkorb in einen Ordner

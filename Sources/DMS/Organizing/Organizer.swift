@@ -89,11 +89,17 @@ final class Organizer: @unchecked Sendable {
                 """, arguments: [Self.maxVersionSize, limit])
         }) ?? []
 
-        for file in files {
-            guard let id = file.id else { continue }
-            let hash = try? FileOps.sha256(file.url)
-            // Nicht lesbar: leere Prüfsumme, damit die Datei nicht endlos neu versucht wird
-            try? db.writer.write { db in
+        // Vier Dateien gleichzeitig; beim NAS wartet das Lesen vor allem auf das Netzwerk
+        let hashes = Locked([String?](repeating: nil, count: files.count))
+        Indexer.parallel(files.count, width: 4) { i in
+            let hash = try? FileOps.sha256(files[i].url)
+            hashes.withLock { $0[i] = hash }
+        }
+        let results = hashes.withLock { $0 }
+        try? db.writer.write { db in
+            for (file, hash) in zip(files, results) {
+                guard let id = file.id else { continue }
+                // Nicht lesbar: leere Prüfsumme, damit die Datei nicht endlos neu versucht wird
                 try db.execute(sql: "UPDATE file SET contentHash = ? WHERE id = ?", arguments: [hash ?? "", id])
             }
         }
@@ -392,6 +398,10 @@ final class Organizer: @unchecked Sendable {
             try db.execute(sql: "UPDATE fileVersion SET originalPath = ? WHERE originalPath = ?", arguments: [entry.fromPath, entry.toPath])
         }
         let sources = try db.sources()
+        // Beim Zurückverschieben Pfade im Index mitnehmen, damit Tags und Text erhalten bleiben
+        if entry.kind == "move", FileManager.default.fileExists(atPath: entry.fromPath) {
+            try? updateIndex(from: entry.toPath, to: entry.fromPath, sources: sources)
+        }
         indexer.refresh(paths: [entry.fromPath, entry.toPath], sources: sources)
     }
 

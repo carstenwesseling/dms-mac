@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Dunkles Design mit Orange als Akzent: Karten mit weichem Verlauf, dünne große Zahlen, Symbole in Kacheln.
@@ -58,6 +59,11 @@ struct Card<Content: View>: View {
 }
 
 extension View {
+    /// Klickbarer Bereich im Dashboard: Handzeiger, leichtes Aufhellen, Sprung beim Klick.
+    func drillDown(_ help: String, action: @escaping () -> Void) -> some View {
+        modifier(DrillDown(help: help, action: action))
+    }
+
     func cardBackground(cornerRadius: CGFloat = 22) -> some View {
         background(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -148,5 +154,23 @@ enum Format {
 
     static func percent(_ value: Double) -> String {
         value.formatted(.percent.precision(.fractionLength(0)))
+    }
+}
+
+private struct DrillDown: ViewModifier {
+    let help: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(Rectangle())
+            .brightness(hovering ? 0.04 : 0)
+            .onHover { hovering = $0 }
+            .pointerStyle(.link)
+            .onTapGesture(perform: action)
+            .help(help)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(named: help, action)
     }
 }

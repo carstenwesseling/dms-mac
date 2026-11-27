@@ -56,7 +56,20 @@ enum TextExtractor {
             text = try readPlainText(url, html: e == "html" || e == "htm")
             method = "text"
         case _ where imageExtensions.contains(e):
-            guard let image = loadImage(url, maxPixel: 3000) else { return nil }
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            if isCameraPhoto(source) {
+                // Normale Fotos: erst kurz an einer kleinen Vorschau prüfen, ob Text zu sehen ist
+                // (Schild, Dokument, Tafel). Nur dann die gründliche Texterkennung.
+                // Dafür reicht meist das in der Datei eingebettete Vorschaubild (wenige KB statt mehrerer MB),
+                // das ist vor allem auf dem NAS viel schneller. Das ganze Bild wird nur bei Text geladen.
+                guard let preview = embeddedPreview(source) ?? loadImage(source, maxPixel: 1200) else { return nil }
+                let small = max(preview.width, preview.height) < 600
+                let quick = try OCR.recognize(preview, fast: !small)
+                guard small ? OCR.mightContainText(quick) : OCR.looksLikeText(quick) else {
+                    return Result(text: "", method: "foto")
+                }
+            }
+            guard let image = loadImage(source, maxPixel: 3000) else { return nil }
             text = try OCR.recognize(image)
             method = "ocr"
         default:
@@ -132,12 +145,41 @@ enum TextExtractor {
 
     static func loadImage(_ url: URL, maxPixel: Int) -> CGImage? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        return loadImage(source, maxPixel: maxPixel)
+    }
+
+    static func loadImage(_ source: CGImageSource, maxPixel: Int) -> CGImage? {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: maxPixel,
         ]
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+
+    /// Eingebettetes Vorschaubild (EXIF) ohne das ganze Bild zu lesen; nil, wenn keins vorhanden ist.
+    static func embeddedPreview(_ source: CGImageSource) -> CGImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageIfAbsent: false,
+            kCGImageSourceCreateThumbnailFromImageAlways: false,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+              max(image.width, image.height) >= 120 else { return nil }
+        return image
+    }
+
+    /// Foto aus einer Kamera oder einem Handy (Hersteller oder Belichtungsdaten in den Metadaten).
+    /// Screenshots, Scans ohne Kameradaten und Grafiken haben das nicht und werden immer voll gelesen.
+    static func isCameraPhoto(_ source: CGImageSource) -> Bool {
+        guard let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else { return false }
+        let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+        if let comment = exif[kCGImagePropertyExifUserComment] as? String, comment.localizedCaseInsensitiveContains("screenshot") {
+            return false
+        }
+        let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
+        return tiff[kCGImagePropertyTIFFMake] != nil || exif[kCGImagePropertyExifExposureTime] != nil
+            || exif[kCGImagePropertyExifFNumber] != nil
     }
 
     static func normalize(_ text: String) -> String {
@@ -153,14 +195,25 @@ enum TextExtractor {
 
 /// Texterkennung mit Apples Vision-Framework (lokal).
 enum OCR {
-    static func recognize(_ image: CGImage) throws -> String {
+    static func recognize(_ image: CGImage, fast: Bool = false) throws -> String {
         let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
+        request.recognitionLevel = fast ? .fast : .accurate
         request.recognitionLanguages = ["de-DE", "en-US"]
-        request.usesLanguageCorrection = true
+        request.usesLanguageCorrection = !fast
         try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
         let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
         return lines.joined(separator: "\n")
+    }
+
+    /// Großzügige Prüfung für kleine Vorschaubilder: schon ein erkanntes Wort reicht für die gründliche Erkennung.
+    static func mightContainText(_ text: String) -> Bool {
+        text.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).contains { $0.count >= 3 }
+    }
+
+    /// Ob die schnelle Erkennung echten Text gefunden hat und nicht nur ein paar zufällige Zeichen.
+    static func looksLikeText(_ text: String) -> Bool {
+        let words = text.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count >= 3 }
+        return words.count >= 3 && words.reduce(0) { $0 + $1.count } >= 15
     }
 }
 

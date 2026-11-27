@@ -27,6 +27,8 @@ struct ContentView: View {
                     ActionLogView()
                 case .ai:
                     AIView()
+                case .processing:
+                    ProcessingView()
                 default:
                     FileBrowserView()
                 }

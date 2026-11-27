@@ -117,3 +117,50 @@ final class SearchQueryTests: XCTestCase {
         XCTAssertEqual(try db.extensionCounts().first?.ext, "pdf")
     }
 }
+
+final class FileTreeTests: XCTestCase {
+    private func row(_ id: Int64, _ path: String, size: Int64 = 10) -> FileRow {
+        let url = URL(fileURLWithPath: path)
+        let file = FileRecord(id: id, sourceId: 1, path: path, name: url.lastPathComponent, ext: url.pathExtension,
+                              typeIdentifier: nil, size: size, modified: Date(), created: nil, lastUsed: nil,
+                              contentHash: nil, textState: .done, scanMark: 1)
+        return FileRow(file: file, sourceName: "Sicherung", snippet: nil)
+    }
+
+    func testFolderTree() {
+        let source = Source(id: 1, name: "Sicherung", kind: .local, path: "/x", remoteURL: nil, lastScan: nil)
+        let rows = [row(1, "/x/a.pdf"), row(2, "/x/Fotos/2024/Urlaub/b.jpg"), row(3, "/x/Fotos/2024/Urlaub/c.jpg"), row(4, "/x/Musik/d.mp3")]
+        let tree = FileTree.folders(rows, sources: [source])
+        XCTAssertEqual(tree.count, 1)
+        XCTAssertEqual(tree[0].name, "Sicherung")
+        XCTAssertEqual(tree[0].fileCount, 4)
+        let names = tree[0].children?.map(\.name)
+        XCTAssertEqual(names, ["Fotos/2024/Urlaub", "Musik", "a.pdf"], "Ordnerkette zusammengefasst, Ordner vor Dateien")
+        XCTAssertEqual(FileTree.ancestors(of: "/x/Fotos/2024/Urlaub/b.jpg", in: tree).count, 2)
+    }
+
+    func testEmptyCreatedFolderAppears() {
+        let source = Source(id: 1, name: "Sicherung", kind: .local, path: "/x", remoteURL: nil, lastScan: nil)
+        let tree = FileTree.folders([row(1, "/x/a.pdf")], sources: [source], extraFolders: ["/x/Neu", "/y/Fremd"])
+        XCTAssertEqual(tree[0].children?.map(\.name), ["Neu", "a.pdf"])
+        XCTAssertEqual(tree[0].children?.first?.fileCount, 0)
+    }
+
+    func testAlbumGroups() {
+        let rows = [row(1, "/m/21_Der ultimative Ratgeber für alles.mp3"), row(2, "/m/15_Der ultimative Ratgeber für alles.mp3"),
+                    row(3, "/m/22_Der ultimative Ratgeber für alles.mp3"), row(4, "/m/Anderes Lied.mp3")]
+        let groups = FileTree.groups(rows)
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertEqual(groups[0].fileCount, 3)
+        XCTAssertTrue(groups[0].name.hasPrefix("Der ultimative Ratgeber für alles"))
+        XCTAssertEqual(groups[0].children?.first?.name, "15_Der ultimative Ratgeber für alles.mp3")
+        XCTAssertFalse(groups[1].isFolder)
+    }
+
+    func testBaseName() {
+        XCTAssertEqual(FileTree.baseName("IMG_0001.jpg"), "img")
+        XCTAssertEqual(FileTree.baseName("01 - Intro.mp3"), "intro")
+        XCTAssertEqual(FileTree.baseName("Vertrag (1).pdf"), "vertrag")
+        XCTAssertEqual(FileTree.baseName("Hörbuch Teil 2.mp3"), "hörbuch")
+    }
+}

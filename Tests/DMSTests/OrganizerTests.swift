@@ -44,6 +44,48 @@ final class OrganizerTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: src, encoding: .utf8), "Hallo")
     }
 
+    func testMoveFolderKeepsIndexAndTags() throws {
+        let db = try AppDatabase.inMemory()
+        let organizer = Organizer(db: db, indexer: Indexer(db: db))
+        let file = try makeFile("Quelle/Fotos/Urlaub/bild.txt", "Strand")
+        let target = tmp.appendingPathComponent("Quelle/Archiv")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        var fileId: Int64 = 0
+        try db.writer.write { db in
+            var source = Source(id: nil, name: "Quelle", kind: .local, path: self.tmp.appendingPathComponent("Quelle").path,
+                                remoteURL: nil, lastScan: nil)
+            try source.insert(db)
+            var rec = FileRecord(id: nil, sourceId: source.id!, path: file.path, name: "bild.txt", ext: "txt", typeIdentifier: nil,
+                                 size: 6, modified: Date(), created: nil, lastUsed: nil, contentHash: nil, textState: .done, scanMark: 1)
+            try rec.insert(db)
+            fileId = rec.id!
+        }
+        try db.addTag("Strand", to: [fileId])
+
+        let folder = tmp.appendingPathComponent("Quelle/Fotos")
+        let outcome = organizer.move([folder, file], into: target)
+        XCTAssertEqual(outcome.errors, [])
+        XCTAssertEqual(outcome.done, 1, "Datei im mitverschobenen Ordner zählt nicht doppelt")
+        let newPath = target.appendingPathComponent("Fotos/Urlaub/bild.txt").path
+        XCTAssertTrue(FileManager.default.fileExists(atPath: newPath))
+        let moved = try db.reader.read { db in try FileRecord.fetchOne(db, key: fileId) }
+        XCTAssertEqual(moved?.path, newPath)
+        XCTAssertEqual(try db.search("Strand").count, 1, "Tag bleibt erhalten")
+
+        let copy = organizer.copy([target.appendingPathComponent("Fotos")], into: tmp.appendingPathComponent("Quelle"))
+        XCTAssertEqual(copy.done, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("Quelle/Fotos/Urlaub/bild.txt").path))
+    }
+
+    func testMoveIntoItselfIsRefused() throws {
+        let db = try AppDatabase.inMemory()
+        let organizer = Organizer(db: db, indexer: Indexer(db: db))
+        _ = try makeFile("A/B/x.txt", "x")
+        let outcome = organizer.move([tmp.appendingPathComponent("A")], into: tmp.appendingPathComponent("A/B"))
+        XCTAssertEqual(outcome.done, 0)
+        XCTAssertEqual(outcome.errors.count, 1)
+    }
+
     func testUniqueNameDoesNotOverwrite() throws {
         _ = try makeFile("x/Datei.pdf", "1")
         let unique = FileOps.uniqueURL(for: tmp.appendingPathComponent("x/Datei.pdf"))
@@ -164,5 +206,70 @@ final class GenericTagTests: XCTestCase {
         let old = #"{"enabled":true,"ollamaURL":"http://localhost:11434","ollamaModel":"qwen2.5:3b"}"#
         let decoded = try JSONDecoder().decode(AISettings.self, from: Data(old.utf8))
         XCTAssertEqual(decoded.visionModel, "qwen2.5vl:3b")
+    }
+}
+
+final class DashboardInsightsTests: XCTestCase {
+    func testUnreadableFilesAreNoDuplicates() throws {
+        let db = try AppDatabase.inMemory()
+        try db.writer.write { db in
+            var source = Source(id: nil, name: "Q", kind: .local, path: "/q", remoteURL: nil, lastScan: nil)
+            try source.insert(db)
+            // Nicht lesbare Dateien bekommen eine leere Prüfsumme und sind keine Dubletten
+            for (i, hash) in ["", "", "", "abc", "abc"].enumerated() {
+                var f = FileRecord(id: nil, sourceId: source.id!, path: "/q/\(i).txt", name: "\(i).txt", ext: "txt",
+                                   typeIdentifier: nil, size: 10, modified: Date(), created: nil, lastUsed: nil,
+                                   contentHash: hash, textState: .done, scanMark: 1)
+                try f.insert(db)
+            }
+        }
+        let insights = try db.dashboardInsights()
+        XCTAssertEqual(insights.duplicateFiles, 1)
+        XCTAssertEqual(insights.duplicateBytes, 10)
+    }
+}
+
+final class ProcessingTests: XCTestCase {
+    func testRestartResetsOnlyFailures() throws {
+        let db = try AppDatabase.inMemory()
+        try db.writer.write { db in
+            var source = Source(id: nil, name: "Q", kind: .local, path: "/q", remoteURL: nil, lastScan: nil)
+            try source.insert(db)
+            let states: [(TextState, String?)] = [(.failed, ""), (.done, "abc"), (.done, nil), (.empty, nil)]
+            for (i, (state, hash)) in states.enumerated() {
+                var f = FileRecord(id: nil, sourceId: source.id!, path: "/q/\(i).pdf", name: "\(i).pdf", ext: "pdf",
+                                   typeIdentifier: nil, size: 10, modified: Date(), created: nil, lastUsed: nil,
+                                   contentHash: hash, textState: state, scanMark: 1)
+                try f.insert(db)
+            }
+            try db.execute(sql: "INSERT INTO analysis(fileId, summary, labels, model, at) VALUES (2, NULL, NULL, 'fehler', ?)", arguments: [Date()])
+            try db.execute(sql: "INSERT INTO analysis(fileId, summary, labels, model, at) VALUES (3, 'Rechnung', 'Strom', 'qwen', ?)", arguments: [Date()])
+        }
+        XCTAssertEqual(try db.processingStats().textFailed, 1)
+        XCTAssertEqual(try db.processingStats().aiFailed, 1)
+        XCTAssertEqual(try db.resetFailedCapture(), 2)
+        XCTAssertEqual(try db.resetFailedTagging(), 1)
+        let s = try db.processingStats()
+        XCTAssertEqual(s.textFailed, 0)
+        XCTAssertEqual(s.hashFailed, 0)
+        XCTAssertEqual(s.textPending, 1)
+        XCTAssertEqual(s.aiFailed, 0)
+        XCTAssertEqual(s.docsDone, 1)
+    }
+}
+
+final class PhotoTextTests: XCTestCase {
+    func testQuickTextCheck() {
+        XCTAssertFalse(OCR.looksLikeText(""))
+        XCTAssertFalse(OCR.looksLikeText("Il ."))
+        XCTAssertFalse(OCR.looksLikeText("EXIT"))
+        XCTAssertTrue(OCR.looksLikeText("Rechnung Nr. 2024-118\nStadtwerke München\nBetrag 84,20 EUR"))
+    }
+}
+
+final class PreviewTextTests: XCTestCase {
+    func testLenientCheckForSmallPreviews() {
+        XCTAssertFalse(OCR.mightContainText("I l ."))
+        XCTAssertTrue(OCR.mightContainText("STOP"))
     }
 }
