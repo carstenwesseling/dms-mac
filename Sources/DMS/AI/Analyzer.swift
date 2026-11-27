@@ -106,12 +106,14 @@ final class Analyzer: @unchecked Sendable {
         guard hasVision || textModel != nil else { return 0 }
 
         let imageList = TextExtractor.imageExtensions.map { "'\($0)'" }.joined(separator: ",")
+        // Ohne Bildmodell nur Bilder mit genug erkanntem Text (Screenshots, Scans); Fotos warten auf das Bildmodell
+        let textFilter = hasVision ? "" : "AND length(COALESCE(c.body, '')) >= 60"
         let rows: [(FileRecord, String, String)] = (try? await db.reader.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT file.*, a.labels AS aLabels, COALESCE(c.body, '') AS cBody FROM file
                 JOIN analysis a ON a.fileId = file.id
                 LEFT JOIN content c ON c.fileId = file.id
-                WHERE file.ext IN (\(imageList)) AND a.model = 'vision'
+                WHERE file.ext IN (\(imageList)) AND a.model = 'vision' \(textFilter)
                   AND file.sourceId IN (\(reachable.map(String.init).joined(separator: ",")))
                 ORDER BY file.modified DESC LIMIT ?
                 """, arguments: [limit]).map { (try FileRecord(row: $0), ($0["aLabels"] as String?) ?? "", $0["cBody"] as String) }
