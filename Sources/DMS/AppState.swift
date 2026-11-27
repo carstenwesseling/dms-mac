@@ -29,6 +29,10 @@ final class AppState: ObservableObject {
     @Published var tags: [Tag] = []
     @Published var sidebar: SidebarItem? = .allFiles
     @Published var query: String = ""
+    /// Filter in der Leiste über der Dateiliste (zusätzlich zur Seitenleiste)
+    @Published var filterSourceId: Int64?
+    @Published var filterCategory: FileCategory?
+    @Published var filterExt: String?
     @Published var rows: [FileRow] = []
     @Published var selection: Set<Int64> = []
     @Published var status: String = ""
@@ -66,7 +70,8 @@ final class AppState: ObservableObject {
     /// Startet die Suche mit den aktuellen Filtern (leicht verzögert beim Tippen).
     func search(debounce: Bool = false) {
         searchTask?.cancel()
-        let text = query
+        let parsed = SearchQuery(parsing: query)
+        let text = parsed.text
         var sourceId: Int64?
         var tagId: Int64?
         var category: FileCategory?
@@ -76,17 +81,43 @@ final class AppState: ObservableObject {
         case .category(let c): category = c
         default: break
         }
+        // Filterleiste und Kürzel im Suchfeld (typ:, quelle:) grenzen weiter ein
+        if let id = filterSourceId { sourceId = id }
+        if let c = filterCategory { category = c }
+        var ext = filterExt
+        if let c = parsed.category { category = c }
+        if let e = parsed.ext { ext = e }
+        if let name = parsed.sourceName {
+            // Unbekannte Quelle: id -1 liefert bewusst keine Treffer
+            sourceId = source(named: name)?.id ?? -1
+        }
         let db = self.db
         searchTask = Task {
             if debounce { try? await Task.sleep(for: .milliseconds(250)) }
             if Task.isCancelled { return }
             let result = await Task.detached(priority: .userInitiated) {
-                (try? db.search(text, sourceId: sourceId, tagId: tagId, category: category)) ?? []
+                (try? db.search(text, sourceId: sourceId, tagId: tagId, category: category, ext: ext)) ?? []
             }.value
             if Task.isCancelled { return }
             self.rows = result
             self.selection = self.selection.intersection(Set(result.map(\.id)))
         }
+    }
+
+    /// Quelle nach Namen: erst genau, dann Anfang, dann enthalten (ohne Groß/Klein).
+    func source(named name: String) -> Source? {
+        let n = name.lowercased()
+        return sources.first { $0.name.lowercased() == n }
+            ?? sources.first { $0.name.lowercased().hasPrefix(n) }
+            ?? sources.first { $0.name.lowercased().contains(n) }
+    }
+
+    var hasActiveFilter: Bool { filterSourceId != nil || filterCategory != nil || filterExt != nil }
+
+    func clearFilters() {
+        filterSourceId = nil
+        filterCategory = nil
+        filterExt = nil
     }
 
     // MARK: - Quellen
@@ -120,6 +151,7 @@ final class AppState: ObservableObject {
     func removeSource(_ source: Source) {
         _ = try? db.writer.write { db in try source.delete(db) }
         if let id = source.id, sidebar == .source(id) { sidebar = .allFiles }
+        if let id = source.id, filterSourceId == id { filterSourceId = nil }
         reloadSidebar()
         restartWatcher()
         search()

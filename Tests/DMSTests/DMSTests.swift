@@ -69,3 +69,51 @@ final class DatabaseTests: XCTestCase {
         XCTAssertEqual(try db.search("a").count, 0)
     }
 }
+
+final class SearchQueryTests: XCTestCase {
+    func testPlainText() {
+        let q = SearchQuery(parsing: "rechnung 2024")
+        XCTAssertEqual(q, SearchQuery(text: "rechnung 2024"))
+    }
+
+    func testTypeAsExtension() {
+        let q = SearchQuery(parsing: "typ:PDF rechnung")
+        XCTAssertEqual(q.ext, "pdf")
+        XCTAssertNil(q.category)
+        XCTAssertEqual(q.text, "rechnung")
+    }
+
+    func testTypeAsCategory() {
+        XCTAssertEqual(SearchQuery(parsing: "typ:bilder").category, .bilder)
+        XCTAssertEqual(SearchQuery(parsing: "typ:bild").category, .bilder)
+        XCTAssertEqual(SearchQuery(parsing: "typ:präsentation").category, .praesentationen)
+        XCTAssertEqual(SearchQuery(parsing: "typ:doc").ext, "doc")
+    }
+
+    func testSourceWithQuotes() {
+        let q = SearchQuery(parsing: "quelle:\"Google Drive\" vertrag")
+        XCTAssertEqual(q.sourceName, "Google Drive")
+        XCTAssertEqual(q.text, "vertrag")
+    }
+
+    func testUnknownKeyStaysText() {
+        XCTAssertEqual(SearchQuery(parsing: "uhrzeit:12 typ:").text, "uhrzeit:12 typ:")
+    }
+
+    func testExtensionFilterInDatabase() throws {
+        let db = try AppDatabase.inMemory()
+        try db.writer.write { db in
+            var source = Source(id: nil, name: "Test", kind: .local, path: "/tmp/t", remoteURL: nil, lastScan: nil)
+            try source.insert(db)
+            for name in ["a.pdf", "b.docx", "c.pdf"] {
+                var f = FileRecord(id: nil, sourceId: source.id!, path: "/tmp/t/\(name)", name: name,
+                                   ext: (name as NSString).pathExtension, typeIdentifier: nil, size: 1, modified: Date(),
+                                   created: nil, lastUsed: nil, contentHash: nil, textState: .done, scanMark: 1)
+                try f.insert(db)
+            }
+        }
+        XCTAssertEqual(try db.search("", ext: "pdf").count, 2)
+        XCTAssertEqual(try db.search("", category: .dokumente, ext: "docx").count, 1)
+        XCTAssertEqual(try db.extensionCounts().first?.ext, "pdf")
+    }
+}

@@ -8,7 +8,11 @@ struct FileBrowserView: View {
 
     var body: some View {
         HSplitView {
-            fileTable
+            VStack(spacing: 0) {
+                FilterBar()
+                Divider()
+                fileTable
+            }
                 .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
                 .layoutPriority(1)
             FileDetailView(rows: state.selectedRows)
@@ -16,12 +20,18 @@ struct FileBrowserView: View {
         }
         // Tabelle und Detail füllen den ganzen Bereich über der Statuszeile
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .searchable(text: $state.query, placement: .toolbar, prompt: "Name, Inhalt oder Tag suchen")
+        .searchable(text: $state.query, placement: .toolbar, prompt: "Suchen, z. B. typ:pdf quelle:cawserver rechnung")
         .onChange(of: state.query) {
             userSorted = false
             state.search(debounce: true)
         }
         .onChange(of: sortOrder) { userSorted = true }
+        .onChange(of: state.filterSourceId) { state.search() }
+        .onChange(of: state.filterCategory) {
+            state.filterExt = nil
+            state.search()
+        }
+        .onChange(of: state.filterExt) { state.search() }
     }
 
     private var fileTable: some View {
@@ -78,6 +88,78 @@ struct FileBrowserView: View {
         // Bei einer Suche bleibt die Trefferreihenfolge, solange nicht umsortiert wird
         if !state.query.isEmpty && !userSorted { return state.rows }
         return state.rows.sorted(using: sortOrder)
+    }
+}
+
+// MARK: - Filterleiste
+
+/// Gezielt nach Quelle, Typ und Dateiendung filtern. Im Suchfeld gehen auch „typ:pdf“ und „quelle:cawserver“.
+struct FilterBar: View {
+    @EnvironmentObject private var state: AppState
+    @State private var extensions: [(ext: String, count: Int)] = []
+
+    private var sidebarFixesSource: Bool {
+        if case .source = state.sidebar { return true } else { return false }
+    }
+    private var sidebarFixesCategory: Bool {
+        if case .category = state.sidebar { return true } else { return false }
+    }
+    private var activeCategory: FileCategory? {
+        if case .category(let c) = state.sidebar { return c }
+        return state.filterCategory
+    }
+    private var visibleExtensions: [(ext: String, count: Int)] {
+        guard let cat = activeCategory else { return extensions }
+        return extensions.filter { FileCategory(ext: $0.ext) == cat }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Picker("Quelle", selection: $state.filterSourceId) {
+                Text("Alle Quellen").tag(Int64?.none)
+                Divider()
+                ForEach(state.sources) { source in
+                    Text(source.name).tag(source.id)
+                }
+            }
+            .fixedSize()
+            .disabled(sidebarFixesSource)
+
+            Picker("Typ", selection: $state.filterCategory) {
+                Text("Alle Typen").tag(FileCategory?.none)
+                Divider()
+                ForEach(FileCategory.allCases, id: \.self) { cat in
+                    Text(cat.rawValue).tag(FileCategory?.some(cat))
+                }
+            }
+            .fixedSize()
+            .disabled(sidebarFixesCategory)
+
+            Picker("Endung", selection: $state.filterExt) {
+                Text("Alle").tag(String?.none)
+                Divider()
+                ForEach(visibleExtensions, id: \.ext) { item in
+                    Text("\(item.ext.uppercased())  (\(item.count.formatted()))").tag(String?.some(item.ext))
+                }
+            }
+            .fixedSize()
+
+            if state.hasActiveFilter {
+                Button("Filter zurücksetzen") { state.clearFilters() }
+                    .buttonStyle(.link)
+            }
+            Spacer()
+            Text("\(state.rows.count == 500 ? "500+" : state.rows.count.formatted()) Treffer")
+                .foregroundStyle(.secondary)
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .help("Tipp: Im Suchfeld geht auch „typ:pdf rechnung“ oder „quelle:cawserver“.")
+        .task(id: state.progress.total) {
+            let db = state.db
+            extensions = await Task.detached { (try? db.extensionCounts()) ?? [] }.value
+        }
     }
 }
 

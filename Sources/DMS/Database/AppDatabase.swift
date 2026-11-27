@@ -201,10 +201,16 @@ extension AppDatabase {
     }
 
     /// Volltextsuche. Leere Suche liefert die zuletzt geänderten Dateien.
-    func search(_ text: String, sourceId: Int64? = nil, tagId: Int64? = nil, category: FileCategory? = nil, limit: Int = 500) throws -> [FileRow] {
+    func search(_ text: String, sourceId: Int64? = nil, tagId: Int64? = nil, category: FileCategory? = nil,
+                ext: String? = nil, limit: Int = 500) throws -> [FileRow] {
         try reader.read { db in
             var conditions: [String] = []
             var args: [(any DatabaseValueConvertible)?] = []
+
+            if let ext {
+                conditions.append("file.ext = ?")
+                args.append(ext.lowercased())
+            }
 
             if let sourceId {
                 conditions.append("file.sourceId = ?")
@@ -255,6 +261,14 @@ extension AppDatabase {
                         sourceName: row["sourceName"],
                         snippet: Self.cleanSnippet(row["snippet"]))
             }
+        }
+    }
+
+    /// Alle vorkommenden Dateiendungen mit Anzahl, häufigste zuerst.
+    func extensionCounts() throws -> [(ext: String, count: Int)] {
+        try reader.read { db in
+            try Row.fetchAll(db, sql: "SELECT ext, COUNT(*) AS n FROM file WHERE ext <> '' GROUP BY ext ORDER BY n DESC")
+                .map { (ext: $0["ext"], count: $0["n"]) }
         }
     }
 
