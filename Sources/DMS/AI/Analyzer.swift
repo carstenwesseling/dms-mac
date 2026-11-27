@@ -44,12 +44,11 @@ final class Analyzer: @unchecked Sendable {
     }
 
     func counts() -> (summaries: Int, pendingDocs: Int, images: Int) {
-        let imageList = TextExtractor.imageExtensions.map { "'\($0)'" }.joined(separator: ",")
         return (try? db.reader.read { db in
             (
                 try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM analysis WHERE summary IS NOT NULL") ?? 0,
                 try Int.fetchOne(db, sql: """
-                    SELECT COUNT(*) FROM file WHERE textState = 'done' AND ext NOT IN (\(imageList))
+                    SELECT COUNT(*) FROM file WHERE textState = 'done' AND ext IN (\(Self.documentList))
                       AND NOT EXISTS (SELECT 1 FROM analysis a WHERE a.fileId = file.id)
                     """) ?? 0,
                 try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM analysis WHERE labels IS NOT NULL") ?? 0
@@ -111,16 +110,19 @@ final class Analyzer: @unchecked Sendable {
 
     // MARK: - Dokumente (Sprachmodell)
 
+    /// Nur echte Dokumente werden zusammengefasst, kein Code und keine Konfigurationsdateien.
+    static let documentExtensions = ["pdf", "doc", "docx", "rtf", "rtfd", "odt", "txt", "md", "xlsx", "pptx", "pages", "numbers", "key"]
+    static var documentList: String { documentExtensions.map { "'\($0)'" }.joined(separator: ",") }
+
     static let systemPrompt = "Du bist ein Assistent für die Verwaltung persönlicher Dokumente. Antworte immer auf Deutsch, knapp und genau im verlangten Format."
 
     /// Fasst bis zu `limit` Dokumente zusammen. Ohne verfügbares Modell passiert nichts.
     func summarizePending(limit: Int = 1) async -> Int {
         let settings = settings()
         guard settings.enabled, let model = await LocalModel.find(settings: settings) else { return 0 }
-        let imageList = TextExtractor.imageExtensions.map { "'\($0)'" }.joined(separator: ",")
         let files: [FileRecord] = (try? await db.reader.read { db in
             try FileRecord.fetchAll(db, sql: """
-                SELECT * FROM file WHERE textState = 'done' AND ext NOT IN (\(imageList))
+                SELECT * FROM file WHERE textState = 'done' AND ext IN (\(Self.documentList))
                   AND NOT EXISTS (SELECT 1 FROM analysis a WHERE a.fileId = file.id)
                 ORDER BY modified DESC LIMIT ?
                 """, arguments: [limit])

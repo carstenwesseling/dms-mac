@@ -10,7 +10,7 @@ struct DMSApp: App {
         WindowGroup("DMS") {
             ContentView()
                 .environmentObject(state)
-                .frame(minWidth: 1000, minHeight: 600)
+                .frame(minWidth: 900, minHeight: 460)
                 .onAppear { state.startBackgroundWork() }
         }
         .commands {

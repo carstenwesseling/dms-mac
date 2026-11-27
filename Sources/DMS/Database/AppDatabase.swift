@@ -164,6 +164,16 @@ final class AppDatabase: @unchecked Sendable {
             }
         }
 
+        migrator.registerMigration("v4-ki-nur-dokumente") { db in
+            // Frühere KI-Vorschläge für Code- und Konfigurationsdateien entfernen
+            let docs = Analyzer.documentList
+            try db.execute(sql: """
+                DELETE FROM suggestion WHERE status = 'open' AND reason = 'KI-Vorschlag'
+                  AND fileId IN (SELECT id FROM file WHERE ext NOT IN (\(docs)))
+                """)
+            try db.execute(sql: "DELETE FROM analysis WHERE labels IS NULL AND fileId IN (SELECT id FROM file WHERE ext NOT IN (\(docs)))")
+        }
+
         return migrator
     }
 }

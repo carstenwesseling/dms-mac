@@ -16,22 +16,15 @@ struct SuggestionsView: View {
                 Text("Ablagevorschläge").font(.title3.bold())
                 Text("Nichts wird verschoben, bevor du es freigibst. Freigegebene Vorschläge werden kopiert, geprüft und erst dann am alten Ort in den Papierkorb gelegt. Alles lässt sich im Protokoll rückgängig machen.")
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(3)
                 HStack {
-                    Button("Vorschläge aktualisieren") {
-                        state.planSuggestions()
-                        Task { try? await Task.sleep(for: .seconds(2)); load() }
-                    }
-                    Button("Ausgewählte ausführen (\(selection.count))") { accept(Array(selection)) }
-                        .disabled(selection.isEmpty || working)
-                        .keyboardShortcut(.defaultAction)
-                    Button("Ablehnen") { reject(Array(selection)) }
-                        .disabled(selection.isEmpty)
+                    Text("\(rows.count) Vorschläge, \(selection.count) ausgewählt").foregroundStyle(.secondary)
                     Spacer()
-                    Toggle("Erledigte und wartende zeigen", isOn: $showDone)
+                    Toggle("Erledigte zeigen", isOn: $showDone)
                 }
             }
             .padding(20)
+            .layoutPriority(1)
 
             Table(rows, selection: $selection) {
                 TableColumn("Datei") { row in
@@ -71,6 +64,29 @@ struct SuggestionsView: View {
                     ContentUnavailableView("Keine offenen Vorschläge", systemImage: "checkmark.circle",
                                            description: Text("Lege unter „Ablage und Versionen“ die Ablageziele fest und klicke auf „Vorschläge aktualisieren“."))
                 }
+            }
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    state.planSuggestions()
+                    Task { try? await Task.sleep(for: .seconds(2)); load() }
+                } label: { Label("Vorschläge aktualisieren", systemImage: "wand.and.stars") }
+                    .help("Vorschläge neu berechnen")
+                Button {
+                    selection = Set(rows.filter { $0.suggestion.status == .open }.map(\.id))
+                } label: { Label("Alle auswählen", systemImage: "checklist") }
+                    .help("Alle offenen Vorschläge auswählen")
+                Button {
+                    reject(Array(selection))
+                } label: { Label("Ablehnen", systemImage: "xmark.circle") }
+                    .disabled(selection.isEmpty)
+                    .help("Ausgewählte Vorschläge ablehnen")
+                Button {
+                    accept(Array(selection))
+                } label: { Label("Ausführen (\(selection.count))", systemImage: "checkmark.circle") }
+                    .disabled(selection.isEmpty || working)
+                    .help("Ausgewählte Vorschläge ausführen")
             }
         }
         .task { load() }
@@ -131,7 +147,7 @@ struct DuplicatesView: View {
                 Text("Dubletten").font(.title3.bold())
                 Text("Gleicher Inhalt in mehreren Ordnern, über alle Quellen. Vorgeschlagen wird, die Kopie am passenden Ablageort zu behalten. Markierte Kopien gehen in den Papierkorb und lassen sich im Protokoll zurückholen.")
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(3)
                 HStack {
                     Text("\(groups.count) Gruppen, \(ByteCountFormatter.string(fromByteCount: groups.reduce(0) { $0 + $1.wastedBytes }, countStyle: .file)) doppelt belegt")
                     Spacer()
@@ -244,7 +260,7 @@ struct RulesView: View {
                 Text("Regeln und feste Ablageorte").font(.title3.bold())
                 Text("Eine Regel setzt einen Tag und/oder legt einen festen Ablageort fest, z. B. „Inhalt enthält Steuer → Tag Steuer, Ablage /Volumes/CAWServer/Archiv/Steuer“. Feste Ablageorte haben Vorrang vor den Nutzungsstufen. Ohne „automatisch“ entstehen nur Vorschläge.")
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(3)
                 HStack {
                     Button("Neue Regel") {
                         editing = Rule(id: nil, name: "", field: .content, value: "", position: rules.count)
