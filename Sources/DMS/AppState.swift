@@ -59,6 +59,7 @@ final class AppState: ObservableObject {
     private var searchTask: Task<Void, Never>?
     private var backgroundStarted = false
     private var captureWorker: Task<Void, Never>?
+    private var captureStop: Locked<Bool>?
     private var taggingWorker: Task<Void, Never>?
     /// Wann die Hintergrundarbeit zuletzt etwas erledigt hat (für die Anzeige „läuft“)
     @Published var lastCaptureWork: Date?
@@ -369,23 +370,17 @@ final class AppState: ObservableObject {
     /// Text auslesen, OCR, Prüfsummen, Versionen und freigegebene Vorschläge, solange etwas offen ist.
     private func startCaptureWorker() {
         captureWorker?.cancel()
-        let indexer = self.indexer
+        captureStop?.withLock { $0 = true }
+        let stop = Locked(false)
+        captureStop = stop
+        indexer.runExtractionLanes(stop: stop) { [weak self] in
+            Task { @MainActor in self?.markWork(\.lastCaptureWork) }
+        }
         let organizer = self.organizer
         let db = self.db
         captureWorker = Task.detached(priority: .utility) { [weak self] in
-            // Drei getrennte Abläufe, damit lange Prüfsummen (z. B. große Videos auf dem NAS)
-            // die Texterkennung nicht aufhalten
+            // Prüfsummen und Versionen getrennt von der Texterkennung, damit sie sich nicht aufhalten
             await withTaskGroup(of: Void.self) { group in
-                group.addTask {
-                    while !Task.isCancelled {
-                        let work = indexer.extractPending(limit: 48)
-                        if work > 0 {
-                            await MainActor.run { self?.markWork(\.lastCaptureWork) }
-                        } else {
-                            try? await Task.sleep(for: .seconds(15))
-                        }
-                    }
-                }
                 group.addTask {
                     while !Task.isCancelled {
                         // Texterkennung hat Vorrang: Prüfsummen lesen ganze Dateien und bremsen das NAS

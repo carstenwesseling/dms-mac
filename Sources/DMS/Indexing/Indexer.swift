@@ -308,7 +308,9 @@ final class Indexer: @unchecked Sendable {
     // MARK: - Textauswertung
 
     /// Wertet bis zu `limit` offene Dateien aus. Gibt die Anzahl bearbeiteter Dateien zurück.
-    func extractPending(limit: Int = 20) -> Int {
+    /// Liest Text aus offenen Dateien. Mit `lanes` > 1 bearbeitet dieser Aufruf nur jede `lanes`-te Datei
+    /// (Spur `lane`), damit mehrere Spuren unabhängig nebeneinander laufen.
+    func extractPending(limit: Int = 20, lane: Int = 0, lanes: Int = 1) -> Int {
         let reachable: [Int64]
         do {
             reachable = try db.sources().filter(\.isReachable).compactMap(\.id)
@@ -322,6 +324,7 @@ final class Indexer: @unchecked Sendable {
                 try FileRecord.fetchAll(db, sql: """
                     SELECT file.* FROM file JOIN source ON source.id = file.sourceId
                     WHERE file.textState = 'pending' AND file.sourceId IN (\(reachable.map(String.init).joined(separator: ",")))
+                      AND file.id % \(max(lanes, 1)) = \(lane)
                     ORDER BY CASE source.kind WHEN 'local' THEN 0 WHEN 'googleDrive' THEN 1 ELSE 2 END, file.modified DESC
                     LIMIT ?
                     """, arguments: [limit])
@@ -330,7 +333,7 @@ final class Indexer: @unchecked Sendable {
 
         // Viele Dateien gleichzeitig lesen: die meiste Zeit wartet die App auf das NAS, nicht auf die CPU
         let results = Locked([(TextState, TextExtractor.Result?)?](repeating: nil, count: files.count))
-        Self.parallel(files.count, width: Self.readWidth) { i in
+        Self.parallel(files.count, width: lanes > 1 ? 1 : Self.readWidth) { i in
             let file = files[i]
             var state: TextState
             var result: TextExtractor.Result?
@@ -374,6 +377,29 @@ extension Array {
 extension Indexer {
     /// Gleichzeitige Lesevorgänge bei der Texterkennung
     static let readWidth = 6
+
+    /// Startet `readWidth` unabhängige Spuren für die Texterkennung auf eigenen Threads.
+    /// Jede Spur holt sich kleine Stapel; eine langsame Datei hält so nur ihre eigene Spur auf,
+    /// nicht alle anderen. Läuft, bis `stop` gesetzt wird.
+    func runExtractionLanes(stop: Locked<Bool>, onWork: @escaping @Sendable () -> Void) {
+        let lanes = Self.readWidth
+        for lane in 0..<lanes {
+            let thread = Thread { [self] in
+                while !stop.withLock({ $0 }) {
+                    let work = autoreleasepool { extractPending(limit: 4, lane: lane, lanes: lanes) }
+                    if work > 0 {
+                        onWork()
+                    } else {
+                        // Nichts offen: kurz warten, dabei auf das Stopp-Signal achten
+                        for _ in 0..<15 where !stop.withLock({ $0 }) { Thread.sleep(forTimeInterval: 1) }
+                    }
+                }
+            }
+            thread.qualityOfService = .utility
+            thread.name = "DMS Texterkennung \(lane + 1)"
+            thread.start()
+        }
+    }
 
     /// Führt `body` für 0..<count aus, höchstens `width` gleichzeitig, und wartet auf alle.
     /// Anders als concurrentPerform nicht auf die Zahl der Kerne begrenzt.
