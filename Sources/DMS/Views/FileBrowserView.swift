@@ -9,10 +9,13 @@ struct FileBrowserView: View {
     var body: some View {
         HSplitView {
             fileTable
-                .frame(minWidth: 420)
+                .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(1)
             FileDetailView(rows: state.selectedRows)
-                .frame(minWidth: 320, idealWidth: 420)
+                .frame(minWidth: 300, idealWidth: 380, maxWidth: 560, maxHeight: .infinity)
         }
+        // Tabelle und Detail füllen den ganzen Bereich über der Statuszeile
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .searchable(text: $state.query, placement: .toolbar, prompt: "Name, Inhalt oder Tag suchen")
         .onChange(of: state.query) {
             userSorted = false
@@ -31,7 +34,7 @@ struct FileBrowserView: View {
                     }
                 }
             }
-            .width(min: 200, ideal: 320)
+            .width(min: 200, ideal: 460)
             TableColumn("Quelle", value: \.sourceName)
                 .width(min: 70, ideal: 110)
             TableColumn("Typ", value: \.file.ext) { row in
