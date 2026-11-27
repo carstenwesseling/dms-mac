@@ -36,12 +36,18 @@ struct Source: Codable, Identifiable, Hashable, Sendable, FetchableRecord, Mutab
     /// Adresse zum erneuten Verbinden, z. B. smb://CAWServer/Daten
     var remoteURL: String?
     var lastScan: Date?
+    /// Versionen geänderter Dateien sichern (Dokumente, Tabellen, Präsentationen).
+    var versioning: Bool = false
 
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
     }
 
     var url: URL { URL(fileURLWithPath: path, isDirectory: true) }
+
+    func contains(_ otherPath: String) -> Bool {
+        otherPath == path || otherPath.hasPrefix(path.hasSuffix("/") ? path : path + "/")
+    }
 
     var isReachable: Bool { FileManager.default.fileExists(atPath: path) }
 }

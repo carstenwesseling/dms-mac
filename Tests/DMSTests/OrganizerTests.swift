@@ -1,0 +1,120 @@
+import GRDB
+import XCTest
+@testable import DMS
+
+final class OrganizerTests: XCTestCase {
+    var tmp: URL!
+
+    override func setUpWithError() throws {
+        tmp = FileManager.default.temporaryDirectory.appendingPathComponent("dms-tests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: tmp)
+    }
+
+    private func makeFile(_ relative: String, _ content: String) throws -> URL {
+        let url = tmp.appendingPathComponent(relative)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try content.write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
+
+    func testTiers() {
+        var settings = StorageSettings()
+        settings.macDays = 60
+        settings.driveDays = 183
+        let now = Date()
+        XCTAssertEqual(Organizer.tier(lastActivity: now.addingTimeInterval(-10 * 86_400), now: now, settings: settings), .mac)
+        XCTAssertEqual(Organizer.tier(lastActivity: now.addingTimeInterval(-90 * 86_400), now: now, settings: settings), .drive)
+        XCTAssertEqual(Organizer.tier(lastActivity: now.addingTimeInterval(-400 * 86_400), now: now, settings: settings), .nas)
+    }
+
+    func testSafeMoveAndUndo() throws {
+        let src = try makeFile("a/Brief.txt", "Hallo")
+        let target = tmp.appendingPathComponent("b/Brief.txt")
+        let result = try FileOps.safeMove(from: src, to: target)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.finalPath))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: src.path))
+
+        let entry = ActionLogEntry(id: 1, at: Date(), kind: "move", fromPath: src.path, toPath: result.finalPath, trashPath: result.trashPath, undone: false)
+        try FileOps.undo(entry)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: src.path))
+        XCTAssertEqual(try String(contentsOf: src, encoding: .utf8), "Hallo")
+    }
+
+    func testUniqueNameDoesNotOverwrite() throws {
+        _ = try makeFile("x/Datei.pdf", "1")
+        let unique = FileOps.uniqueURL(for: tmp.appendingPathComponent("x/Datei.pdf"))
+        XCTAssertEqual(unique.lastPathComponent, "Datei (2).pdf")
+    }
+
+    func testPlannerSuggestsArchiveForOldFile() throws {
+        let db = try AppDatabase.inMemory()
+        let indexer = Indexer(db: db)
+        let organizer = Organizer(db: db, indexer: indexer)
+        let srcDir = tmp.appendingPathComponent("Dokumente")
+        let file = try makeFile("Dokumente/Steuer/alt.txt", "Steuerbescheid 2020")
+        let archive = tmp.appendingPathComponent("Archiv").path
+
+        var settings = StorageSettings()
+        settings.nasTarget = archive
+        try organizer.save(settings)
+
+        try db.writer.write { db in
+            var source = Source(id: nil, name: "Dokumente", kind: .local, path: srcDir.path, remoteURL: nil, lastScan: nil)
+            try source.insert(db)
+            var rec = FileRecord(id: nil, sourceId: source.id!, path: file.path, name: "alt.txt", ext: "txt", typeIdentifier: nil,
+                                 size: 19, modified: Date(timeIntervalSinceNow: -500 * 86_400), created: nil, lastUsed: nil,
+                                 contentHash: nil, textState: .done, scanMark: 1)
+            try rec.insert(db)
+            try db.execute(sql: "INSERT INTO content(fileId, body, method) VALUES (?, 'Steuerbescheid 2020', 'text')", arguments: [rec.id])
+            try AppDatabase.reindexFTS(db, fileId: rec.id!)
+        }
+
+        try organizer.planSuggestions()
+        var rows = try organizer.suggestions(status: [.open])
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.suggestion.target, archive + "/Dokumente/Steuer/alt.txt")
+
+        // Rejected suggestions are not proposed again
+        try organizer.setStatus(rows.map(\.id), .rejected)
+        try organizer.planSuggestions()
+        XCTAssertTrue(try organizer.suggestions(status: [.open]).isEmpty)
+
+        // A rule with a fixed location wins over the tier, and can add a tag
+        let fixed = tmp.appendingPathComponent("Steuerordner").path
+        try organizer.save(Rule(id: nil, name: "Steuer", field: .content, value: "Steuerbescheid", addTag: "Steuer", targetPath: fixed))
+        try organizer.planSuggestions()
+        rows = try organizer.suggestions(status: [.open])
+        XCTAssertTrue(rows.contains { $0.suggestion.kind == .move && $0.suggestion.target == fixed + "/alt.txt" })
+        XCTAssertTrue(rows.contains { $0.suggestion.kind == .tag && $0.suggestion.target == "Steuer" })
+
+        // Executing the move updates the log
+        try organizer.setStatus(rows.map(\.id), .queued)
+        XCTAssertEqual(organizer.processQueue(), 2)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixed + "/alt.txt"))
+        XCTAssertEqual(try organizer.log().count, 1)
+    }
+
+    func testDuplicateGroups() throws {
+        let db = try AppDatabase.inMemory()
+        let organizer = Organizer(db: db, indexer: Indexer(db: db))
+        let a = try makeFile("s/a.txt", "gleich")
+        let b = try makeFile("s/kopie/b.txt", "gleich")
+        try db.writer.write { db in
+            var source = Source(id: nil, name: "S", kind: .local, path: tmp.appendingPathComponent("s").path, remoteURL: nil, lastScan: nil)
+            try source.insert(db)
+            for url in [a, b] {
+                var rec = FileRecord(id: nil, sourceId: source.id!, path: url.path, name: url.lastPathComponent, ext: "txt", typeIdentifier: nil,
+                                     size: 6, modified: Date(), created: nil, lastUsed: nil, contentHash: nil, textState: .done, scanMark: 1)
+                try rec.insert(db)
+            }
+        }
+        XCTAssertEqual(organizer.hashCandidates(), 2)
+        let groups = try organizer.duplicateGroups()
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups.first?.files.count, 2)
+    }
+}

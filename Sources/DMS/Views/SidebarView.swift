@@ -10,6 +10,13 @@ struct SidebarView: View {
                 Label("Alle Dateien", systemImage: "doc.on.doc").tag(SidebarItem.allFiles)
             }
 
+            Section("Ordnen") {
+                Label("Ablagevorschläge", systemImage: "tray.and.arrow.down").tag(SidebarItem.suggestions)
+                Label("Dubletten", systemImage: "doc.on.doc.fill").tag(SidebarItem.duplicates)
+                Label("Regeln", systemImage: "list.bullet.rectangle").tag(SidebarItem.rules)
+                Label("Protokoll", systemImage: "clock.arrow.circlepath").tag(SidebarItem.log)
+            }
+
             Section("Dateitypen") {
                 ForEach(FileCategory.allCases, id: \.self) { category in
                     Label(category.rawValue, systemImage: category.systemImage)
@@ -32,6 +39,10 @@ struct SidebarView: View {
                         .contextMenu {
                             Button("Neu scannen") { state.scan(source) }
                             Button("Im Finder zeigen") { NSWorkspace.shared.open(source.url) }
+                            Toggle("Versionen sichern", isOn: Binding(
+                                get: { source.versioning },
+                                set: { state.setVersioning(source, $0) }
+                            ))
                             Divider()
                             Button("Quelle entfernen (Dateien bleiben erhalten)", role: .destructive) {
                                 state.removeSource(source)
@@ -58,6 +69,7 @@ struct SidebarView: View {
             }
 
             Section("Einstellungen") {
+                Label("Ablage und Versionen", systemImage: "externaldrive.badge.timemachine").tag(SidebarItem.storageSettings)
                 Label("Standard-Apps", systemImage: "app.badge.checkmark").tag(SidebarItem.defaultApps)
             }
         }
