@@ -7,7 +7,6 @@ struct DashboardView: View {
     @State private var sourceStats: [SourceStats] = []
     @State private var categoryStats: [CategoryStats] = []
     @State private var insights = DashboardInsights()
-    @State private var selectedAngle: Int64?
 
     private let gap: CGFloat = 16
 
@@ -154,6 +153,22 @@ struct DashboardView: View {
         }
     }
 
+    /// Segment unter dem Klickpunkt; die Segmente beginnen oben und laufen im Uhrzeigersinn.
+    private func slice(at point: CGPoint, in size: CGSize) -> SourceKind? {
+        let dx = point.x - size.width / 2, dy = point.y - size.height / 2
+        var angle = atan2(dx, -dy)
+        if angle < 0 { angle += 2 * .pi }
+        let total = slices.reduce(Int64(0)) { $0 + $1.bytes }
+        guard total > 0 else { return nil }
+        let target = Double(total) * angle / (2 * .pi)
+        var acc = 0.0
+        for slice in slices {
+            acc += Double(slice.bytes)
+            if target <= acc { return slice.kind }
+        }
+        return slices.last?.kind
+    }
+
     private var places: some View {
         Card(title: "Platz pro Speicherort") {
             let total = slices.reduce(Int64(0)) { $0 + $1.bytes }
@@ -167,16 +182,15 @@ struct DashboardView: View {
                             .cornerRadius(3)
                             .foregroundStyle(color(for: slice.kind))
                     }
-                    .chartAngleSelection(value: $selectedAngle)
-                    .onChange(of: selectedAngle) {
-                        guard let value = selectedAngle else { return }
-                        var acc: Int64 = 0
-                        for slice in slices {
-                            acc += slice.bytes
-                            if value <= acc { state.showFiles(kind: slice.kind); break }
+                    // Nur ein Klick springt in den Speicherort, Überfahren mit der Maus nicht
+                    .contentShape(Circle())
+                    .pointerStyle(.link)
+                    .onTapGesture(coordinateSpace: .local) { location in
+                        if let kind = slice(at: location, in: CGSize(width: 160, height: 160)) {
+                            state.showFiles(kind: kind)
                         }
-                        selectedAngle = nil
                     }
+                    .help("Auf ein Segment klicken, um den Speicherort als Ordnerstruktur zu öffnen")
                     .chartBackground { _ in
                         let parts = Format.bytesParts(total)
                         VStack(spacing: 0) {

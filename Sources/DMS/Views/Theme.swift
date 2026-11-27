@@ -166,10 +166,8 @@ private struct DrillDown: ViewModifier {
         content
             .contentShape(Rectangle())
             .brightness(hovering ? 0.04 : 0)
-            .onHover { inside in
-                hovering = inside
-                if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-            }
+            .onHover { hovering = $0 }
+            .pointerStyle(.link)
             .onTapGesture(perform: action)
             .help(help)
             .accessibilityAddTraits(.isButton)

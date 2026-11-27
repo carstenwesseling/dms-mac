@@ -121,8 +121,14 @@ struct FilterBar: View {
         return extensions.filter { FileCategory(ext: $0.ext) == cat }
     }
 
+    private var hitsText: String {
+        let limit = state.browseMode == .list ? 500 : 50_000
+        let count = state.rows.count
+        return (count >= limit ? "\(limit.formatted())+" : count.formatted()) + " Treffer"
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Picker("Ansicht", selection: $state.browseMode) {
                 ForEach(BrowseMode.allCases) { mode in
                     Label(mode.label, systemImage: mode.systemImage).tag(mode)
@@ -137,10 +143,13 @@ struct FilterBar: View {
                 Button {
                     state.filterKind = nil
                 } label: {
-                    Label(kind == .nas ? "CAWServer" : kind.label, systemImage: "xmark.circle.fill")
+                    HStack(spacing: 4) {
+                        Text(kind == .nas ? "CAWServer" : kind.label).lineLimit(1)
+                        Image(systemName: "xmark.circle.fill")
+                    }
                 }
                 .buttonStyle(.bordered)
-                .tint(Theme.accent)
+                .fixedSize()
                 .help("Filter auf diesen Speicherort aufheben")
             }
 
@@ -151,7 +160,9 @@ struct FilterBar: View {
                     Text(source.name).tag(source.id)
                 }
             }
+            .labelsHidden()
             .fixedSize()
+            .help("Quelle")
             .disabled(sidebarFixesSource)
 
             Picker("Typ", selection: $state.filterCategory) {
@@ -161,25 +172,36 @@ struct FilterBar: View {
                     Text(cat.rawValue).tag(FileCategory?.some(cat))
                 }
             }
+            .labelsHidden()
             .fixedSize()
+            .help("Typ")
             .disabled(sidebarFixesCategory)
 
             Picker("Endung", selection: $state.filterExt) {
-                Text("Alle").tag(String?.none)
+                Text("Alle Endungen").tag(String?.none)
                 Divider()
                 ForEach(visibleExtensions, id: \.ext) { item in
                     Text("\(item.ext.uppercased())  (\(item.count.formatted()))").tag(String?.some(item.ext))
                 }
             }
+            .labelsHidden()
             .fixedSize()
+            .help("Dateiendung")
 
             if state.hasActiveFilter {
-                Button("Filter zurücksetzen") { state.clearFilters() }
-                    .buttonStyle(.link)
+                Button {
+                    state.clearFilters()
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Filter zurücksetzen")
             }
-            Spacer()
-            Text("\(state.rows.count == 500 ? "500+" : state.rows.count.formatted()) Treffer")
+            Spacer(minLength: 8)
+            Text(hitsText)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize()
         }
         .controlSize(.small)
         .padding(.horizontal, 10)
