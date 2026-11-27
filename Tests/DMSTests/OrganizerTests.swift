@@ -266,3 +266,10 @@ final class PhotoTextTests: XCTestCase {
         XCTAssertTrue(OCR.looksLikeText("Rechnung Nr. 2024-118\nStadtwerke München\nBetrag 84,20 EUR"))
     }
 }
+
+final class PreviewTextTests: XCTestCase {
+    func testLenientCheckForSmallPreviews() {
+        XCTAssertFalse(OCR.mightContainText("I l ."))
+        XCTAssertTrue(OCR.mightContainText("STOP"))
+    }
+}

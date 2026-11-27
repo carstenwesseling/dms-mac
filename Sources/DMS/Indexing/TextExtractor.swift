@@ -60,8 +60,12 @@ enum TextExtractor {
             if isCameraPhoto(source) {
                 // Normale Fotos: erst kurz an einer kleinen Vorschau prüfen, ob Text zu sehen ist
                 // (Schild, Dokument, Tafel). Nur dann die gründliche Texterkennung.
-                guard let preview = loadImage(source, maxPixel: 1200) else { return nil }
-                guard OCR.looksLikeText(try OCR.recognize(preview, fast: true)) else {
+                // Dafür reicht meist das in der Datei eingebettete Vorschaubild (wenige KB statt mehrerer MB),
+                // das ist vor allem auf dem NAS viel schneller. Das ganze Bild wird nur bei Text geladen.
+                guard let preview = embeddedPreview(source) ?? loadImage(source, maxPixel: 1200) else { return nil }
+                let small = max(preview.width, preview.height) < 600
+                let quick = try OCR.recognize(preview, fast: !small)
+                guard small ? OCR.mightContainText(quick) : OCR.looksLikeText(quick) else {
                     return Result(text: "", method: "foto")
                 }
             }
@@ -153,6 +157,18 @@ enum TextExtractor {
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
+    /// Eingebettetes Vorschaubild (EXIF) ohne das ganze Bild zu lesen; nil, wenn keins vorhanden ist.
+    static func embeddedPreview(_ source: CGImageSource) -> CGImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageIfAbsent: false,
+            kCGImageSourceCreateThumbnailFromImageAlways: false,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+              max(image.width, image.height) >= 120 else { return nil }
+        return image
+    }
+
     /// Foto aus einer Kamera oder einem Handy (Hersteller oder Belichtungsdaten in den Metadaten).
     /// Screenshots, Scans ohne Kameradaten und Grafiken haben das nicht und werden immer voll gelesen.
     static func isCameraPhoto(_ source: CGImageSource) -> Bool {
@@ -187,6 +203,11 @@ enum OCR {
         try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
         let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
         return lines.joined(separator: "\n")
+    }
+
+    /// Großzügige Prüfung für kleine Vorschaubilder: schon ein erkanntes Wort reicht für die gründliche Erkennung.
+    static func mightContainText(_ text: String) -> Bool {
+        text.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).contains { $0.count >= 3 }
     }
 
     /// Ob die schnelle Erkennung echten Text gefunden hat und nicht nur ein paar zufällige Zeichen.

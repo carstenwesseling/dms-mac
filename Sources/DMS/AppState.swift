@@ -371,6 +371,7 @@ final class AppState: ObservableObject {
         captureWorker?.cancel()
         let indexer = self.indexer
         let organizer = self.organizer
+        let db = self.db
         captureWorker = Task.detached(priority: .utility) { [weak self] in
             // Drei getrennte Abläufe, damit lange Prüfsummen (z. B. große Videos auf dem NAS)
             // die Texterkennung nicht aufhalten
@@ -387,6 +388,11 @@ final class AppState: ObservableObject {
                 }
                 group.addTask {
                     while !Task.isCancelled {
+                        // Texterkennung hat Vorrang: Prüfsummen lesen ganze Dateien und bremsen das NAS
+                        if let pending = try? db.progress().pending, pending > 0 {
+                            try? await Task.sleep(for: .seconds(60))
+                            continue
+                        }
                         if organizer.hashCandidates(limit: 20) == 0 {
                             try? await Task.sleep(for: .seconds(30))
                         }

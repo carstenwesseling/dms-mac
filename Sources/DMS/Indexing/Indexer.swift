@@ -373,7 +373,7 @@ extension Array {
 
 extension Indexer {
     /// Gleichzeitige Lesevorgänge bei der Texterkennung
-    static let readWidth = 16
+    static let readWidth = 6
 
     /// Führt `body` für 0..<count aus, höchstens `width` gleichzeitig, und wartet auf alle.
     /// Anders als concurrentPerform nicht auf die Zahl der Kerne begrenzt.
