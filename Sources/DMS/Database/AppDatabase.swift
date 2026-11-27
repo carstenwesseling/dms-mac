@@ -99,6 +99,60 @@ final class AppDatabase: @unchecked Sendable {
                 """)
         }
 
+        migrator.registerMigration("v2-ablage") { db in
+            try db.create(table: "setting") { t in
+                t.primaryKey("key", .text)
+                t.column("value", .text).notNull()
+            }
+
+            try db.alter(table: "source") { t in
+                t.add(column: "versioning", .boolean).notNull().defaults(to: false)
+            }
+
+            try db.create(table: "rule") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("name", .text).notNull()
+                t.column("enabled", .boolean).notNull().defaults(to: true)
+                t.column("automatic", .boolean).notNull().defaults(to: false)
+                t.column("field", .text).notNull()       // name, content, ext, tag
+                t.column("value", .text).notNull()
+                t.column("addTag", .text)
+                t.column("targetPath", .text)
+                t.column("position", .integer).notNull().defaults(to: 0)
+            }
+
+            try db.create(table: "suggestion") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("fileId", .integer).notNull().indexed().references("file", onDelete: .cascade)
+                t.column("kind", .text).notNull()        // move, trashDuplicate, tag
+                t.column("target", .text).notNull()      // Zielpfad oder Tag-Name
+                t.column("reason", .text).notNull()
+                t.column("status", .text).notNull().indexed()   // open, rejected, queued, done, failed
+                t.column("detail", .text)
+                t.column("createdAt", .datetime).notNull()
+                t.uniqueKey(["fileId", "kind", "target"])
+            }
+
+            try db.create(table: "actionLog") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("at", .datetime).notNull()
+                t.column("kind", .text).notNull()        // move, trash
+                t.column("fromPath", .text).notNull()
+                t.column("toPath", .text).notNull()
+                t.column("trashPath", .text)             // Original im Papierkorb (für Rückgängig)
+                t.column("undone", .boolean).notNull().defaults(to: false)
+            }
+
+            try db.create(table: "fileVersion") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("originalPath", .text).notNull().indexed()
+                t.column("at", .datetime).notNull()
+                t.column("contentHash", .text).notNull()
+                t.column("size", .integer).notNull()
+                t.column("copyPath", .text)              // nil = wartet auf NAS
+            }
+        }
+
         return migrator
     }
 }

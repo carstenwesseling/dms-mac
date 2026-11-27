@@ -14,6 +14,16 @@ struct ContentView: View {
                     DashboardView()
                 case .defaultApps:
                     DefaultAppsView()
+                case .duplicates:
+                    DuplicatesView()
+                case .suggestions:
+                    SuggestionsView()
+                case .rules:
+                    RulesView()
+                case .storageSettings:
+                    StorageSettingsView()
+                case .log:
+                    ActionLogView()
                 default:
                     FileBrowserView()
                 }

@@ -9,6 +9,11 @@ enum SidebarItem: Hashable {
     case source(Int64)
     case tag(Int64)
     case defaultApps
+    case duplicates
+    case suggestions
+    case rules
+    case storageSettings
+    case log
 }
 
 /// Zentrale Steuerung der App: Quellen, Suche, Auswahl, Hintergrundarbeit.
@@ -16,6 +21,7 @@ enum SidebarItem: Hashable {
 final class AppState: ObservableObject {
     let db: AppDatabase
     let indexer: Indexer
+    let organizer: Organizer
 
     @Published var sources: [Source] = []
     @Published var tags: [Tag] = []
@@ -38,6 +44,7 @@ final class AppState: ObservableObject {
             fatalError("Datenbank konnte nicht geöffnet werden: \(error)")
         }
         indexer = Indexer(db: db)
+        organizer = Organizer(db: db, indexer: indexer)
         reloadSidebar()
         search()
     }
@@ -146,12 +153,20 @@ final class AppState: ObservableObject {
         restartWatcher()
         scanAll()
 
-        // Text auslesen und OCR, solange etwas offen ist
+        // Text auslesen, OCR, Prüfsummen, Versionen und freigegebene Vorschläge, solange etwas offen ist
         let indexer = self.indexer
+        let organizer = self.organizer
         Task.detached(priority: .background) {
+            var lastQueueRun = Date.distantPast
             while true {
-                let done = indexer.extractPending(limit: 20)
-                if done == 0 {
+                var work = indexer.extractPending(limit: 20)
+                work += organizer.hashCandidates(limit: 40)
+                work += organizer.snapshotVersions(limit: 10)
+                if Date().timeIntervalSince(lastQueueRun) > 60 {
+                    organizer.processQueue()
+                    lastQueueRun = Date()
+                }
+                if work == 0 {
                     try? await Task.sleep(for: .seconds(15))
                 }
             }
@@ -175,6 +190,7 @@ final class AppState: ObservableObject {
                 for source in self.sources where source.kind == .nas {
                     self.scan(source)
                 }
+                self.planSuggestions()
             }
         }
     }
@@ -187,6 +203,39 @@ final class AppState: ObservableObject {
             indexer.refresh(paths: paths, sources: watched)
             Task { @MainActor in self?.search() }
         }
+    }
+
+    // MARK: - Ablage
+
+    /// Erstellt die Ablagevorschläge neu (im Hintergrund).
+    func planSuggestions() {
+        let organizer = self.organizer
+        status = "Vorschläge werden berechnet …"
+        Task.detached(priority: .utility) {
+            let result = Result { try organizer.planSuggestions() }
+            await MainActor.run {
+                switch result {
+                case .success(let n): self.status = "\(n) neue Vorschläge"
+                case .failure(let e): self.status = "Vorschläge fehlgeschlagen: \(e.localizedDescription)"
+                }
+                self.objectWillChange.send()
+            }
+        }
+    }
+
+    /// Sorgt dafür, dass ein Ablageziel im Index liegt (sonst wird es als Quelle hinzugefügt).
+    func ensureIndexed(_ path: String?) {
+        guard let path, !path.isEmpty, !sources.contains(where: { $0.contains(path) }) else { return }
+        try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        addSource(URL(fileURLWithPath: path, isDirectory: true))
+    }
+
+    func setVersioning(_ source: Source, _ on: Bool) {
+        guard let id = source.id else { return }
+        try? db.writer.write { db in
+            try db.execute(sql: "UPDATE source SET versioning = ? WHERE id = ?", arguments: [on, id])
+        }
+        reloadSidebar()
     }
 
     // MARK: - Dateien
