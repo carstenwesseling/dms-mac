@@ -208,3 +208,23 @@ final class GenericTagTests: XCTestCase {
         XCTAssertEqual(decoded.visionModel, "qwen2.5vl:3b")
     }
 }
+
+final class DashboardInsightsTests: XCTestCase {
+    func testUnreadableFilesAreNoDuplicates() throws {
+        let db = try AppDatabase.inMemory()
+        try db.writer.write { db in
+            var source = Source(id: nil, name: "Q", kind: .local, path: "/q", remoteURL: nil, lastScan: nil)
+            try source.insert(db)
+            // Nicht lesbare Dateien bekommen eine leere Prüfsumme und sind keine Dubletten
+            for (i, hash) in ["", "", "", "abc", "abc"].enumerated() {
+                var f = FileRecord(id: nil, sourceId: source.id!, path: "/q/\(i).txt", name: "\(i).txt", ext: "txt",
+                                   typeIdentifier: nil, size: 10, modified: Date(), created: nil, lastUsed: nil,
+                                   contentHash: hash, textState: .done, scanMark: 1)
+                try f.insert(db)
+            }
+        }
+        let insights = try db.dashboardInsights()
+        XCTAssertEqual(insights.duplicateFiles, 1)
+        XCTAssertEqual(insights.duplicateBytes, 10)
+    }
+}

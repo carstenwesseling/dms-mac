@@ -68,7 +68,7 @@ extension AppDatabase {
             if let row = try Row.fetchOne(db, sql: """
                 SELECT COALESCE(SUM(n - 1), 0) AS files, COALESCE(SUM((n - 1) * size), 0) AS bytes FROM (
                     SELECT COUNT(*) AS n, MAX(size) AS size FROM file
-                    WHERE contentHash IS NOT NULL GROUP BY contentHash HAVING n > 1)
+                    WHERE contentHash IS NOT NULL AND contentHash != '' GROUP BY contentHash HAVING n > 1)
                 """) {
                 r.duplicateFiles = row["files"]
                 r.duplicateBytes = row["bytes"]
