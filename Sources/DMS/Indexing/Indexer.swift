@@ -319,11 +319,12 @@ final class Indexer: @unchecked Sendable {
         }
 
         let finished = results.withLock { $0 }
-        for (file, entry) in zip(files, finished) {
-            guard let id = file.id, let entry else { continue }
-            let (state, result) = entry
-            do {
-                try db.writer.write { db in
+        // Alles in einem Schreibvorgang sichern statt einzeln pro Datei
+        do {
+            try db.writer.write { db in
+                for (file, entry) in zip(files, finished) {
+                    guard let id = file.id, let entry else { continue }
+                    let (state, result) = entry
                     if let result, state == .done {
                         try db.execute(sql: "INSERT OR REPLACE INTO content(fileId, body, method) VALUES (?, ?, ?)",
                                        arguments: [id, result.text, result.method])
@@ -331,9 +332,9 @@ final class Indexer: @unchecked Sendable {
                     try db.execute(sql: "UPDATE file SET textState = ? WHERE id = ?", arguments: [state.rawValue, id])
                     try AppDatabase.reindexFTS(db, fileId: id)
                 }
-            } catch {
-                NSLog("DMS could not save text for \(file.path): \(error)")
             }
+        } catch {
+            NSLog("DMS could not save extracted text: \(error)")
         }
         return files.count
     }

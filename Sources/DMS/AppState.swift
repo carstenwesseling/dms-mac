@@ -371,20 +371,34 @@ final class AppState: ObservableObject {
         captureWorker?.cancel()
         let indexer = self.indexer
         let organizer = self.organizer
-        captureWorker = Task.detached(priority: .background) { [weak self] in
-            var lastQueueRun = Date.distantPast
-            while !Task.isCancelled {
-                var work = indexer.extractPending(limit: 20)
-                work += organizer.hashCandidates(limit: 40)
-                work += organizer.snapshotVersions(limit: 10)
-                if Date().timeIntervalSince(lastQueueRun) > 60 {
-                    organizer.processQueue()
-                    lastQueueRun = Date()
+        captureWorker = Task.detached(priority: .utility) { [weak self] in
+            // Drei getrennte Abläufe, damit lange Prüfsummen (z. B. große Videos auf dem NAS)
+            // die Texterkennung nicht aufhalten
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    while !Task.isCancelled {
+                        let work = indexer.extractPending(limit: 48)
+                        if work > 0 {
+                            await MainActor.run { self?.markWork(\.lastCaptureWork) }
+                        } else {
+                            try? await Task.sleep(for: .seconds(15))
+                        }
+                    }
                 }
-                if work > 0 {
-                    await MainActor.run { self?.markWork(\.lastCaptureWork) }
-                } else {
-                    try? await Task.sleep(for: .seconds(15))
+                group.addTask {
+                    while !Task.isCancelled {
+                        if organizer.hashCandidates(limit: 20) == 0 {
+                            try? await Task.sleep(for: .seconds(30))
+                        }
+                    }
+                }
+                group.addTask {
+                    while !Task.isCancelled {
+                        organizer.processQueue()
+                        if organizer.snapshotVersions(limit: 10) == 0 {
+                            try? await Task.sleep(for: .seconds(60))
+                        }
+                    }
                 }
             }
         }
