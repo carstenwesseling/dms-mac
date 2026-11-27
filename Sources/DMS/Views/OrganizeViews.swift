@@ -96,7 +96,7 @@ struct SuggestionsView: View {
         try? state.organizer.setStatus(ids, .queued)
         let organizer = state.organizer
         Task {
-            await Task.detached(priority: .userInitiated) { organizer.processQueue() }.value
+            await Task.detached(priority: .userInitiated) { _ = organizer.processQueue() }.value
             working = false
             selection = []
             load()
