@@ -16,7 +16,11 @@ struct ProcessingView: View {
                 Text("Liest alle Quellen neu ein, nimmt neue und geänderte Dateien auf und versucht Dateien erneut, die nicht gelesen werden konnten. Es wird nichts verschoben oder gelöscht.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("Datenerfassung neu starten") {
+                Toggle("Mac während der Erfassung wach halten", isOn: $state.keepAwake)
+                Text("Verhindert den Ruhezustand, solange noch Dateien offen sind. Der Bildschirm geht trotzdem aus. Im Ruhezustand trennt macOS das NAS; die App verbindet es danach automatisch wieder.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                                Button("Datenerfassung neu starten") {
                     state.restartCapture()
                     message = state.status
                     reload()
