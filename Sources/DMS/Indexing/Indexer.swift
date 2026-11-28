@@ -386,7 +386,7 @@ extension Indexer {
         for lane in 0..<lanes {
             let thread = Thread { [self] in
                 while !stop.withLock({ $0 }) {
-                    let work = autoreleasepool { extractPending(limit: 4, lane: lane, lanes: lanes) }
+                    let work = autoreleasepool { extractPending(limit: 1, lane: lane, lanes: lanes) }
                     if work > 0 {
                         onWork()
                     } else {
