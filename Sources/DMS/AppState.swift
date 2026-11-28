@@ -59,6 +59,15 @@ final class AppState: ObservableObject {
     private var searchTask: Task<Void, Never>?
     private var backgroundStarted = false
     private var captureWorker: Task<Void, Never>?
+    private var captureStop: Locked<Bool>?
+    private var awakeActivity: NSObjectProtocol?
+    /// Mac nicht in den Ruhezustand gehen lassen, solange noch Dateien zu erfassen sind
+    @Published var keepAwake: Bool = UserDefaults.standard.object(forKey: "keepAwakeDuringCapture") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(keepAwake, forKey: "keepAwakeDuringCapture")
+            updateAwake()
+        }
+    }
     private var taggingWorker: Task<Void, Never>?
     /// Wann die Hintergrundarbeit zuletzt etwas erledigt hat (für die Anzeige „läuft“)
     @Published var lastCaptureWork: Date?
@@ -349,8 +358,23 @@ final class AppState: ObservableObject {
                 if let p = await Task.detached(operation: { try? db.progress() }).value, p != self.progress {
                     // Nur bei Änderung veröffentlichen, sonst zeichnen alle Ansichten alle 3 Sekunden neu
                     self.progress = p
+                    self.updateAwake()
                 }
                 try? await Task.sleep(for: .seconds(3))
+            }
+        }
+
+        // Getrenntes NAS (z. B. nach dem Ruhezustand) alle 5 Minuten wieder verbinden
+        Task {
+            while true {
+                try? await Task.sleep(for: .seconds(300))
+                let offline = self.sources.filter { $0.kind == .nas && !$0.isReachable }.compactMap(\.remoteURL)
+                guard !offline.isEmpty else { continue }
+                let mounted = await Task.detached { offline.map { NASMounter.mount($0) }.contains(true) }.value
+                if mounted {
+                    self.status = "NAS wieder verbunden"
+                    self.reloadSidebar()
+                }
             }
         }
 
@@ -369,23 +393,17 @@ final class AppState: ObservableObject {
     /// Text auslesen, OCR, Prüfsummen, Versionen und freigegebene Vorschläge, solange etwas offen ist.
     private func startCaptureWorker() {
         captureWorker?.cancel()
-        let indexer = self.indexer
+        captureStop?.withLock { $0 = true }
+        let stop = Locked(false)
+        captureStop = stop
+        indexer.runExtractionLanes(stop: stop) { [weak self] in
+            Task { @MainActor in self?.markWork(\.lastCaptureWork) }
+        }
         let organizer = self.organizer
         let db = self.db
         captureWorker = Task.detached(priority: .utility) { [weak self] in
-            // Drei getrennte Abläufe, damit lange Prüfsummen (z. B. große Videos auf dem NAS)
-            // die Texterkennung nicht aufhalten
+            // Prüfsummen und Versionen getrennt von der Texterkennung, damit sie sich nicht aufhalten
             await withTaskGroup(of: Void.self) { group in
-                group.addTask {
-                    while !Task.isCancelled {
-                        let work = indexer.extractPending(limit: 48)
-                        if work > 0 {
-                            await MainActor.run { self?.markWork(\.lastCaptureWork) }
-                        } else {
-                            try? await Task.sleep(for: .seconds(15))
-                        }
-                    }
-                }
                 group.addTask {
                     while !Task.isCancelled {
                         // Texterkennung hat Vorrang: Prüfsummen lesen ganze Dateien und bremsen das NAS
@@ -425,6 +443,18 @@ final class AppState: ObservableObject {
                     try? await Task.sleep(for: .seconds(30))
                 }
             }
+        }
+    }
+
+    /// Hält den Mac wach, solange Dateien offen sind (der Bildschirm darf trotzdem ausgehen).
+    private func updateAwake() {
+        let needed = keepAwake && progress.pending > 0
+        if needed, awakeActivity == nil {
+            awakeActivity = ProcessInfo.processInfo.beginActivity(options: [.idleSystemSleepDisabled],
+                                                                  reason: "DMS erfasst Dateien")
+        } else if !needed, let activity = awakeActivity {
+            ProcessInfo.processInfo.endActivity(activity)
+            awakeActivity = nil
         }
     }
 

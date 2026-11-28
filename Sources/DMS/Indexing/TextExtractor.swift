@@ -57,19 +57,18 @@ enum TextExtractor {
             method = "text"
         case _ where imageExtensions.contains(e):
             guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-            if isCameraPhoto(source) {
-                // Normale Fotos: erst kurz an einer kleinen Vorschau prüfen, ob Text zu sehen ist
-                // (Schild, Dokument, Tafel). Nur dann die gründliche Texterkennung.
-                // Dafür reicht meist das in der Datei eingebettete Vorschaubild (wenige KB statt mehrerer MB),
-                // das ist vor allem auf dem NAS viel schneller. Das ganze Bild wird nur bei Text geladen.
-                guard let preview = embeddedPreview(source) ?? loadImage(source, maxPixel: 1200) else { return nil }
-                let small = max(preview.width, preview.height) < 600
-                let quick = try OCR.recognize(preview, fast: !small)
-                guard small ? OCR.mightContainText(quick) : OCR.looksLikeText(quick) else {
-                    return Result(text: "", method: "foto")
-                }
+            // Jedes Bild erst kurz an einer kleinen Vorschau prüfen, ob Text zu sehen ist (Schild, Dokument,
+            // Screenshot). Die gründliche Erkennung ist teuer und läuft in Apples Vision nacheinander,
+            // deshalb nur, wenn wirklich Text da ist. Bei Kamerafotos reicht meist das eingebettete
+            // Vorschaubild (wenige KB statt mehrerer MB), das ist vor allem auf dem NAS viel schneller.
+            let preview = (isCameraPhoto(source) ? embeddedPreview(source) : nil) ?? loadImage(source, maxPixel: 1200)
+            guard let preview else { return nil }
+            let small = max(preview.width, preview.height) < 600
+            let quick = try OCR.recognize(preview, fast: !small)
+            guard small ? OCR.mightContainText(quick) : OCR.looksLikeText(quick) else {
+                return Result(text: "", method: "foto")
             }
-            guard let image = loadImage(source, maxPixel: 3000) else { return nil }
+            guard let image = loadImage(source, maxPixel: 2000) else { return nil }
             text = try OCR.recognize(image)
             method = "ocr"
         default:
