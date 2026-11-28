@@ -293,3 +293,14 @@ final class CaptureSettingsTests: XCTestCase {
         XCTAssertEqual(try db.processingStats().textPending, 3)
     }
 }
+
+final class MediaCaptureTests: XCTestCase {
+    func testDisabledVideosAreExcludedFromHashing() {
+        let before = CaptureSettings.isEnabled(.videos)
+        defer { CaptureSettings.setEnabled(.videos, before) }
+        CaptureSettings.setEnabled(.videos, false)
+        XCTAssertTrue(CaptureSettings.excludedFromHashing.contains("mp4"))
+        CaptureSettings.setEnabled(.videos, true)
+        XCTAssertFalse(CaptureSettings.excludedFromHashing.contains("mp4"))
+    }
+}

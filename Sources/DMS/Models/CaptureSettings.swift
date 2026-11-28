@@ -5,6 +5,19 @@ import Foundation
 enum CaptureSettings {
     /// Typen, aus denen überhaupt Text gelesen werden kann
     static let categories: [FileCategory] = [.dokumente, .tabellen, .praesentationen, .bilder, .code, .sonstige]
+    /// Typen ohne Text, die nur für die Dublettensuche ganz gelesen werden (Prüfsumme)
+    static let mediaCategories: [FileCategory] = [.videos, .audio, .archive]
+
+    static let mediaExtensions: [FileCategory: [String]] = [
+        .videos: ["mov", "mp4", "m4v", "avi", "mkv", "wmv"],
+        .audio: ["mp3", "m4a", "wav", "aiff", "flac", "aac"],
+        .archive: ["zip", "rar", "7z", "tar", "gz", "dmg", "iso"],
+    ]
+
+    /// Endungen, deren Prüfsumme nicht berechnet werden soll (abgeschaltete Medientypen)
+    static var excludedFromHashing: [String] {
+        mediaCategories.filter { !isEnabled($0) }.flatMap { mediaExtensions[$0] ?? [] }
+    }
 
     static func isEnabled(_ category: FileCategory) -> Bool {
         !UserDefaults.standard.bool(forKey: key(category))
@@ -28,6 +41,9 @@ enum CaptureSettings {
         case .bilder: return "Bilder und Fotos (Texterkennung)"
         case .code: return "Code"
         case .sonstige: return "Sonstige Textdateien (z. B. ini, log)"
+        case .videos: return "Videos"
+        case .audio: return "Musik und Audio"
+        case .archive: return "Archive (zip, dmg …)"
         default: return category.rawValue
         }
     }
