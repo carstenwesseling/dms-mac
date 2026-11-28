@@ -464,6 +464,15 @@ final class AppState: ObservableObject {
         self[keyPath: key] = Date()
     }
 
+    /// Erfassung eines Dateityps ein- oder ausschalten.
+    func setCapture(_ category: FileCategory, enabled: Bool) {
+        CaptureSettings.setEnabled(category, enabled)
+        let n = (try? db.applyCapture(category, enabled: enabled)) ?? 0
+        let name = CaptureSettings.label(category)
+        status = enabled ? "\(name): \(n) Dateien werden erfasst" : "\(name): \(n) offene Dateien übersprungen"
+        objectWillChange.send()
+    }
+
     /// Alle Quellen neu einlesen und Dateien, die nicht gelesen werden konnten, erneut versuchen.
     func restartCapture() {
         let reset = (try? db.resetFailedCapture()) ?? 0

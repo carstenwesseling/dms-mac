@@ -23,6 +23,11 @@ enum TextExtractor {
     ]
     static let attributedStringExtensions: Set<String> = ["doc", "rtf", "rtfd", "odt", "wordml"]
 
+    /// Alle Endungen, aus denen Text gelesen werden kann.
+    static var supportedExtensions: Set<String> {
+        imageExtensions.union(plainTextExtensions).union(attributedStringExtensions).union(["pdf", "docx", "xlsx", "pptx"])
+    }
+
     /// Ob ein Dateityp überhaupt ausgewertet wird.
     static func supports(ext: String) -> Bool {
         let e = ext.lowercased()

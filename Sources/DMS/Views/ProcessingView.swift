@@ -30,6 +30,24 @@ struct ProcessingView: View {
             }
 
             Section {
+                ForEach(CaptureSettings.categories, id: \.self) { category in
+                    Toggle(CaptureSettings.label(category), isOn: Binding(
+                        get: { CaptureSettings.isEnabled(category) },
+                        set: { on in
+                            state.setCapture(category, enabled: on)
+                            message = state.status
+                            reload()
+                        }
+                    ))
+                }
+                Text("Abgeschaltete Typen bleiben im Index und sind über Name, Ordner und Tags auffindbar, ihr Inhalt wird aber nicht gelesen. Ohne Bilder entfällt auch das automatische Taggen von Fotos. Einschalten holt die Erfassung nach.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("Was erfasst wird")
+            }
+
+            Section {
                 LabeledContent("Status") { ActivityBadge(last: state.lastTaggingWork, open: stats.imagesPending + stats.docsPending) }
                 LabeledContent("Bilder", value: "\(stats.imagesTagged.formatted()) getaggt, \(stats.imagesPending.formatted()) offen")
                 LabeledContent("Dokumente", value: "\(stats.docsDone.formatted()) zusammengefasst, \(stats.docsPending.formatted()) offen")
