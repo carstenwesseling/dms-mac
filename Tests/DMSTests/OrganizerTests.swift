@@ -273,3 +273,34 @@ final class PreviewTextTests: XCTestCase {
         XCTAssertTrue(OCR.mightContainText("STOP"))
     }
 }
+
+final class CaptureSettingsTests: XCTestCase {
+    func testDisablingImagesSkipsPendingPhotos() throws {
+        let db = try AppDatabase.inMemory()
+        try db.writer.write { db in
+            var source = Source(id: nil, name: "Q", kind: .local, path: "/q", remoteURL: nil, lastScan: nil)
+            try source.insert(db)
+            for (i, ext) in ["jpg", "JPG", "pdf"].enumerated() {
+                var f = FileRecord(id: nil, sourceId: source.id!, path: "/q/\(i).\(ext)", name: "\(i).\(ext)", ext: ext,
+                                   typeIdentifier: nil, size: 10, modified: Date(), created: nil, lastUsed: nil,
+                                   contentHash: nil, textState: .pending, scanMark: 1)
+                try f.insert(db)
+            }
+        }
+        XCTAssertEqual(try db.applyCapture(.bilder, enabled: false), 2)
+        XCTAssertEqual(try db.processingStats().textPending, 1)
+        XCTAssertEqual(try db.applyCapture(.bilder, enabled: true), 2)
+        XCTAssertEqual(try db.processingStats().textPending, 3)
+    }
+}
+
+final class MediaCaptureTests: XCTestCase {
+    func testDisabledVideosAreExcludedFromHashing() {
+        let before = CaptureSettings.isEnabled(.videos)
+        defer { CaptureSettings.setEnabled(.videos, before) }
+        CaptureSettings.setEnabled(.videos, false)
+        XCTAssertTrue(CaptureSettings.excludedFromHashing.contains("mp4"))
+        CaptureSettings.setEnabled(.videos, true)
+        XCTAssertFalse(CaptureSettings.excludedFromHashing.contains("mp4"))
+    }
+}

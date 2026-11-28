@@ -78,11 +78,14 @@ final class Organizer: @unchecked Sendable {
         guard let reachable = try? db.sources().filter(\.isReachable).compactMap(\.id), !reachable.isEmpty else { return 0 }
         let idList = reachable.map(String.init).joined(separator: ",")
         let extList = Self.versionableExtensions.map { "'\($0)'" }.joined(separator: ",")
+        // Abgeschaltete Medientypen (z. B. Videos) nicht lesen: das sind die größten Dateien
+        let excluded = CaptureSettings.excludedFromHashing
+        let skip = excluded.isEmpty ? "" : "AND lower(file.ext) NOT IN (" + excluded.map { "'\($0)'" }.joined(separator: ",") + ")"
         let files: [FileRecord] = (try? db.reader.read { db in
             try FileRecord.fetchAll(db, sql: """
                 SELECT file.* FROM file JOIN source ON source.id = file.sourceId
                 WHERE file.contentHash IS NULL AND file.size > 0 AND file.textState != 'cloudOnly'
-                  AND file.sourceId IN (\(idList))
+                  AND file.sourceId IN (\(idList)) \(skip)
                   AND (file.size IN (SELECT size FROM file WHERE size > 0 GROUP BY size HAVING COUNT(*) > 1)
                        OR (source.versioning = 1 AND file.ext IN (\(extList)) AND file.size <= ?))
                 LIMIT ?

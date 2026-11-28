@@ -214,7 +214,8 @@ final class Indexer: @unchecked Sendable {
         let state: TextState
         if info.cloudOnly {
             state = .cloudOnly
-        } else if !TextExtractor.supports(ext: info.ext) || info.size > TextExtractor.maxFileSize {
+        } else if !TextExtractor.supports(ext: info.ext) || info.size > TextExtractor.maxFileSize
+                    || !CaptureSettings.isEnabled(ext: info.ext) {
             state = .skipped
         } else {
             state = .pending

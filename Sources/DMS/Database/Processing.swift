@@ -69,4 +69,21 @@ extension AppDatabase {
             return n
         }
     }
+
+    /// Typ ein- oder ausschalten: offene Dateien dieses Typs werden übersprungen bzw. wieder eingereiht.
+    @discardableResult
+    func applyCapture(_ category: FileCategory, enabled: Bool) throws -> Int {
+        let exts = CaptureSettings.extensions(of: category)
+        guard !exts.isEmpty else { return 0 }
+        let list = exts.map { "'\($0)'" }.joined(separator: ",")
+        return try writer.write { db in
+            if enabled {
+                try db.execute(sql: "UPDATE file SET textState = 'pending' WHERE textState = 'skipped' AND lower(ext) IN (\(list)) AND size <= ?",
+                               arguments: [TextExtractor.maxFileSize])
+            } else {
+                try db.execute(sql: "UPDATE file SET textState = 'skipped' WHERE textState = 'pending' AND lower(ext) IN (\(list))")
+            }
+            return db.changesCount
+        }
+    }
 }

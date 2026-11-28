@@ -30,6 +30,34 @@ struct ProcessingView: View {
             }
 
             Section {
+                ForEach(CaptureSettings.categories, id: \.self) { category in
+                    Toggle(CaptureSettings.label(category), isOn: Binding(
+                        get: { CaptureSettings.isEnabled(category) },
+                        set: { on in
+                            state.setCapture(category, enabled: on)
+                            message = state.status
+                            reload()
+                        }
+                    ))
+                }
+                ForEach(CaptureSettings.mediaCategories, id: \.self) { category in
+                    Toggle(CaptureSettings.label(category) + " (für die Dublettensuche ganz lesen)", isOn: Binding(
+                        get: { CaptureSettings.isEnabled(category) },
+                        set: { on in
+                            CaptureSettings.setEnabled(category, on)
+                            message = "\(CaptureSettings.label(category)): " + (on ? "werden wieder gelesen" : "werden nicht mehr gelesen")
+                            state.objectWillChange.send()
+                        }
+                    ))
+                }
+                Text("Abgeschaltete Typen bleiben im Index und sind über Name, Ordner und Tags auffindbar, ihr Inhalt wird aber nicht gelesen. Ohne Bilder entfällt auch das automatische Taggen von Fotos. Ohne Videos, Audio oder Archive werden diese nicht mehr als Dubletten erkannt. Einschalten holt die Erfassung nach.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("Was erfasst wird")
+            }
+
+            Section {
                 LabeledContent("Status") { ActivityBadge(last: state.lastTaggingWork, open: stats.imagesPending + stats.docsPending) }
                 LabeledContent("Bilder", value: "\(stats.imagesTagged.formatted()) getaggt, \(stats.imagesPending.formatted()) offen")
                 LabeledContent("Dokumente", value: "\(stats.docsDone.formatted()) zusammengefasst, \(stats.docsPending.formatted()) offen")
